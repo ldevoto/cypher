@@ -53,6 +53,15 @@
   summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   .small { font-size: 12px; color: var(--muted); }
   .hidden { display: none; }
+  .st-grid { display: grid; grid-template-columns: max-content repeat(4, 22px); justify-content: start; gap: 6px 10px; align-items: center; margin-top: 10px; font-size: 12px; }
+  .st-grid .lbl { padding-right: 14px; }
+  .st-grid .h { color: var(--muted); font-size: 13px; text-align: center; justify-self: center; }
+  .st-grid .lbl { color: var(--muted); }
+  .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--line); justify-self: center; transition: background .15s, transform .15s; }
+  .dot.run { background: var(--warn); transform: scale(1.2); }
+  .dot.ok { background: var(--ok); }
+  .dot.err { background: var(--err); }
+  .st-legend { margin-top: 8px; font-size: 12px; color: var(--muted); }
   code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
 </style>
 </head>
@@ -138,6 +147,8 @@
       <div class="small" id="selfTestStatus" style="flex:3 1 300px">Autoprueba: ejecutando…</div>
       <div style="flex:0 0 auto"><button type="button" class="btn" id="selfTestBtn">Ejecutar autoprueba</button></div>
     </div>
+    <div class="st-grid" id="selfTestGrid"></div>
+    <div class="st-legend">Chequeos por combinación: ① descifra el texto fijo · ② rechaza una clave incorrecta · ③ cifrar da exactamente el texto fijo · ④ cifra y descifra con datos al azar. Pasá el mouse por un punto para ver el detalle.</div>
   </div>
 
   <div class="panel">
@@ -454,37 +465,67 @@
       [2, 2, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq-1xQ5P-aBKmu792pe81zsoWq1bEBRIiz9pxp6uWvfnCOdK0ZuHj62VOM4gTMMMMXPZaYc6vuoat-_AVDEoaTw0AtYb4UuQLk78-uEBDVa_dYz9movSpWrH05ChSlEF-Z4mpo4_lSq_rORcBoHmgA4p"],
       [3, 2, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq_ldKOE819-6amPhNKf2Y0YXedBOBEspx1sRGhhCnQ1TuqWbGgM3je3oD7awjuSiD8paEXPNbJM4dDCS-8xaOMfPcaIs9CYY1IQ_voqNn-y0bSW7HvtNSdhNArJB-OhijObYM-BfcyttiexYnNyg4u9"],
   ];
+  const CHECKS = ["Descifra el texto fijo", "Rechaza una clave incorrecta", "Cifrar da exactamente el texto fijo", "Cifra y descifra con datos al azar"];
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  function buildGrid() {
+    const g = $("selfTestGrid");
+    g.textContent = "";
+    const add = (cls, text, title) => { const d = document.createElement("div"); d.className = cls; if (text) d.textContent = text; if (title) d.title = title; g.appendChild(d); return d; };
+    add("", "");
+    ["①", "②", "③", "④"].forEach((n, i) => add("h", n, CHECKS[i]));
+    return TEST_VECTORS.map(([algId, kdfId]) => {
+      add("lbl", ALGS[algId].name + " · PBKDF2-" + KDFS[kdfId]);
+      return CHECKS.map((c) => add("dot", "", c + ": pendiente"));
+    });
+  }
   async function selfTest() {
     const btn = $("selfTestBtn"), status = $("selfTestStatus"), alert = $("selfTestAlert");
     btn.disabled = true; status.textContent = "Autoprueba: ejecutando…"; status.style.color = "";
-    const t0 = performance.now();
+    const dots = buildGrid();
     const fails = [];
-    for (const [algId, kdfId, vec] of TEST_VECTORS) {
+    let ms = 0;
+    const fixed = { salt: TEST_SALT, iv: TEST_IV };
+    for (let v = 0; v < TEST_VECTORS.length; v++) {
+      const [algId, kdfId, vec] = TEST_VECTORS[v];
       const label = ALGS[algId].name + " / PBKDF2-" + KDFS[kdfId];
-      try {
-        // 1) Descifrar un texto fijo conocido.
-        if (await decrypt(vec, TEST_PW, algId, kdfId, TEST_ITER) !== TEST_TEXT) throw new Error("resultado distinto");
-        // 2) Con la clave incorrecta tiene que fallar.
-        let rejected = false;
-        try { await decrypt(vec, TEST_PW + "x", algId, kdfId, TEST_ITER); } catch { rejected = true; }
-        if (!rejected) throw new Error("aceptó una clave incorrecta");
-        // 3) Cifrar con la misma sal e IV del vector tiene que dar exactamente el mismo texto cifrado.
-        const fixed = { salt: TEST_SALT, iv: TEST_IV };
-        if (await encrypt(TEST_TEXT, TEST_PW, algId, kdfId, TEST_ITER, fixed) !== vec) throw new Error("el cifrado no coincide con el texto cifrado esperado");
-        // 4) Cifrar y descifrar de nuevo con sal e IV aleatorios.
-        const ct = await encrypt(TEST_TEXT, TEST_PW, algId, kdfId, TEST_ITER);
-        if (ct.length !== vec.length) throw new Error("largo de salida distinto");
-        if (await decrypt(ct, TEST_PW, algId, kdfId, TEST_ITER) !== TEST_TEXT) throw new Error("ida y vuelta falló");
-      } catch (e) { fails.push(label + " (" + (e && e.message ? e.message : e) + ")"); }
+      const steps = [
+        async () => { if (await decrypt(vec, TEST_PW, algId, kdfId, TEST_ITER) !== TEST_TEXT) throw new Error("resultado distinto"); },
+        async () => {
+          let rejected = false;
+          try { await decrypt(vec, TEST_PW + "x", algId, kdfId, TEST_ITER); } catch { rejected = true; }
+          if (!rejected) throw new Error("aceptó una clave incorrecta");
+        },
+        async () => { if (await encrypt(TEST_TEXT, TEST_PW, algId, kdfId, TEST_ITER, fixed) !== vec) throw new Error("el cifrado no coincide con el texto cifrado esperado"); },
+        async () => {
+          const ct = await encrypt(TEST_TEXT, TEST_PW, algId, kdfId, TEST_ITER);
+          if (ct.length !== vec.length) throw new Error("largo de salida distinto");
+          if (await decrypt(ct, TEST_PW, algId, kdfId, TEST_ITER) !== TEST_TEXT) throw new Error("ida y vuelta falló");
+        },
+      ];
+      for (let i = 0; i < steps.length; i++) {
+        const dot = dots[v][i];
+        dot.className = "dot run";
+        const t0 = performance.now();
+        try {
+          await steps[i]();
+          dot.className = "dot ok"; dot.title = CHECKS[i] + ": OK";
+        } catch (e) {
+          const why = e && e.message ? e.message : String(e);
+          dot.className = "dot err"; dot.title = CHECKS[i] + ": FALLÓ (" + why + ")";
+          fails.push(label + ", " + CHECKS[i].toLowerCase() + " (" + why + ")");
+        }
+        ms += performance.now() - t0;
+        await sleep(40); // pausa breve solo para que se vea el avance
+      }
     }
-    const ms = Math.round(performance.now() - t0);
+    const total = TEST_VECTORS.length * CHECKS.length;
     if (fails.length) {
-      status.textContent = "Autoprueba: FALLÓ en " + fails.length + " de " + TEST_VECTORS.length + " combinaciones.";
+      status.textContent = "Autoprueba: FALLARON " + fails.length + " de " + total + " chequeos.";
       status.style.color = "var(--err)";
       alert.className = "msg show err";
       alert.textContent = "La autoprueba falló: este navegador no produce los resultados esperados. No cifres nada nuevo acá; probá con otro navegador. Detalle: " + fails.join("; ");
     } else {
-      status.textContent = "Autoprueba OK: las " + TEST_VECTORS.length + " combinaciones de algoritmo y derivación funcionan correctamente (" + ms + " ms).";
+      status.textContent = "Autoprueba OK: " + total + " de " + total + " chequeos correctos (" + Math.round(ms) + " ms de cálculo).";
       status.style.color = "var(--ok)";
       alert.className = "msg"; alert.textContent = "";
     }
