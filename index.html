@@ -53,6 +53,11 @@
   summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   .small { font-size: 12px; color: var(--muted); }
   .hidden { display: none; }
+  .st-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; }
+  .st-summary::-webkit-details-marker { display: none; }
+  .st-summary::before { content: "▸"; color: var(--muted); transition: transform .15s; }
+  #selfTestPanel[open] > .st-summary::before { transform: rotate(90deg); }
+  .st-summary > span { flex: 1; }
   .st-grid { display: grid; grid-template-columns: max-content repeat(4, 22px); justify-content: start; gap: 6px 10px; align-items: center; margin-top: 10px; font-size: 12px; }
   .st-grid .lbl { padding-right: 14px; }
   .st-grid .h { color: var(--muted); font-size: 13px; text-align: center; justify-self: center; }
@@ -70,6 +75,38 @@
   <h1>🔐 Cypher</h1>
   <p class="sub">Cifrá y descifrá texto con tu clave maestra. Todo ocurre en tu navegador. Nada se guarda ni se envía: esta página tiene la red bloqueada.</p>
   <div class="msg" id="selfTestAlert" role="alert" style="margin:0 0 16px"></div>
+
+  <div class="panel">
+    <details id="selfTestPanel">
+    <summary class="st-summary">
+      <span class="small" id="selfTestStatus">Autoprueba: ejecutando…</span>
+      <button type="button" class="btn" id="selfTestBtn">Ejecutar autoprueba</button>
+    </summary>
+    <div class="st-grid" id="selfTestGrid"></div>
+    <div class="st-legend">Chequeos por combinación: ① descifra el texto fijo · ② rechaza una clave incorrecta · ③ cifrar da exactamente el texto fijo · ④ cifra y descifra con datos al azar. Pasá el mouse por un punto para ver el detalle.</div>
+    <details id="selfTestHelp" style="margin-top:10px">
+      <summary>¿Qué hago si algún punto sale en rojo?</summary>
+      <div class="small" style="margin-top:6px">
+        <p style="margin:4px 0"><b>Tus textos ya cifrados no se dañaron.</b> El texto cifrado es solo un dato guardado en tu anotador; un punto rojo indica que <i>este navegador</i> (o esta versión) ya no calcula esa combinación como se espera. No borres ni sobrescribas nada.</p>
+        <p style="margin:4px 0"><b>Qué hacer:</b></p>
+        <ol style="margin:4px 0 4px 18px;padding:0">
+          <li>No cifres nada nuevo con la combinación en rojo en este navegador.</li>
+          <li>Abrí la página en otro navegador (Chrome, Firefox, Edge, Safari) o en otro dispositivo y corré la autoprueba. Si ahí sale todo verde, usalo para descifrar.</li>
+          <li>Apenas tengas un navegador en verde, descifrá los textos de esa combinación y volvé a cifrarlos con una combinación que salga verde en todos lados (por ejemplo AES-256-GCM).</li>
+        </ol>
+        <p style="margin:4px 0"><b>Qué implica cada punto rojo para lo que ya tenías cifrado con esa combinación:</b></p>
+        <ul style="margin:4px 0 4px 18px;padding:0">
+          <li><b>①</b> (no descifra el texto fijo): en este navegador probablemente no puedas descifrar esos textos. Hacelo desde un navegador donde ① salga verde.</li>
+          <li><b>②</b> (acepta una clave incorrecta): no confíes en ningún resultado de este navegador para esa combinación, aunque parezca correcto.</li>
+          <li><b>③ o ④</b> con ① en verde: tus textos existentes se descifran bien, pero lo que cifres acá podría no poder descifrarse en otro navegador o más adelante. Si cifraste algo nuevo en este navegador, verificá que se descifre en otro.</li>
+          <li><b>Todos en rojo</b>: el navegador no ofrece Web Crypto o está muy desactualizado. Actualizalo o usá otro.</li>
+        </ul>
+        <p style="margin:4px 0">Guardá siempre una copia de este <code>index.html</code> junto a tu anotador: abierta como archivo local funciona igual y no depende del hosting.</p>
+      </div>
+    </details>
+    </details>
+  </div>
+
 
   <div class="panel">
     <div class="tabs" role="tablist">
@@ -140,35 +177,6 @@
       <button type="button" class="btn" id="copy">Copiar</button>
       <button type="button" class="btn hidden" id="reveal">Mostrar texto</button>
     </div>
-  </div>
-
-  <div class="panel">
-    <div class="row" style="align-items:center">
-      <div class="small" id="selfTestStatus" style="flex:3 1 300px">Autoprueba: ejecutando…</div>
-      <div style="flex:0 0 auto"><button type="button" class="btn" id="selfTestBtn">Ejecutar autoprueba</button></div>
-    </div>
-    <div class="st-grid" id="selfTestGrid"></div>
-    <div class="st-legend">Chequeos por combinación: ① descifra el texto fijo · ② rechaza una clave incorrecta · ③ cifrar da exactamente el texto fijo · ④ cifra y descifra con datos al azar. Pasá el mouse por un punto para ver el detalle.</div>
-    <details id="selfTestHelp" style="margin-top:10px">
-      <summary>¿Qué hago si algún punto sale en rojo?</summary>
-      <div class="small" style="margin-top:6px">
-        <p style="margin:4px 0"><b>Tus textos ya cifrados no se dañaron.</b> El texto cifrado es solo un dato guardado en tu anotador; un punto rojo indica que <i>este navegador</i> (o esta versión) ya no calcula esa combinación como se espera. No borres ni sobrescribas nada.</p>
-        <p style="margin:4px 0"><b>Qué hacer:</b></p>
-        <ol style="margin:4px 0 4px 18px;padding:0">
-          <li>No cifres nada nuevo con la combinación en rojo en este navegador.</li>
-          <li>Abrí la página en otro navegador (Chrome, Firefox, Edge, Safari) o en otro dispositivo y corré la autoprueba. Si ahí sale todo verde, usalo para descifrar.</li>
-          <li>Apenas tengas un navegador en verde, descifrá los textos de esa combinación y volvé a cifrarlos con una combinación que salga verde en todos lados (por ejemplo AES-256-GCM).</li>
-        </ol>
-        <p style="margin:4px 0"><b>Qué implica cada punto rojo para lo que ya tenías cifrado con esa combinación:</b></p>
-        <ul style="margin:4px 0 4px 18px;padding:0">
-          <li><b>①</b> (no descifra el texto fijo): en este navegador probablemente no puedas descifrar esos textos. Hacelo desde un navegador donde ① salga verde.</li>
-          <li><b>②</b> (acepta una clave incorrecta): no confíes en ningún resultado de este navegador para esa combinación, aunque parezca correcto.</li>
-          <li><b>③ o ④</b> con ① en verde: tus textos existentes se descifran bien, pero lo que cifres acá podría no poder descifrarse en otro navegador o más adelante. Si cifraste algo nuevo en este navegador, verificá que se descifre en otro.</li>
-          <li><b>Todos en rojo</b>: el navegador no ofrece Web Crypto o está muy desactualizado. Actualizalo o usá otro.</li>
-        </ul>
-        <p style="margin:4px 0">Guardá siempre una copia de este <code>index.html</code> junto a tu anotador: abierta como archivo local funciona igual y no depende del hosting.</p>
-      </div>
-    </details>
   </div>
 
   <div class="panel">
@@ -544,7 +552,9 @@
       status.style.color = "var(--err)";
       alert.className = "msg show err";
       $("selfTestHelp").open = true;
-      alert.textContent = "La autoprueba falló: este navegador no produce los resultados esperados. Tus textos ya cifrados no se dañaron, pero no cifres nada nuevo acá. Mirá \"¿Qué hago si algún punto sale en rojo?\" debajo de la autoprueba. Detalle: " + fails.join("; ");
+      $("selfTestPanel").open = true;
+      alert.textContent = "La autoprueba falló: este navegador no produce los resultados esperados. Tus textos ya cifrados no se dañaron, pero no cifres nada nuevo acá. Abajo están los chequeos que fallaron (pasá el mouse por los puntos rojos para ver el detalle) y qué hacer.";
+      console.warn("Autoprueba:", fails);
     } else {
       status.textContent = "Autoprueba OK: " + total + " de " + total + " chequeos correctos (" + Math.round(ms) + " ms de cálculo).";
       status.style.color = "var(--ok)";
@@ -552,7 +562,8 @@
     }
     btn.disabled = false;
   }
-  $("selfTestBtn").onclick = selfTest;
+  // El botón está dentro del encabezado colapsable: que no abra/cierre el panel.
+  $("selfTestBtn").onclick = (e) => { e.preventDefault(); selfTest(); };
 
   setMode("enc");
   updateMeter();
