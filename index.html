@@ -60,6 +60,7 @@
 <main>
   <h1>🔐 Cypher</h1>
   <p class="sub">Cifrá y descifrá texto con tu clave maestra. Todo ocurre en tu navegador. Nada se guarda ni se envía: esta página tiene la red bloqueada.</p>
+  <div class="msg" id="selfTestAlert" role="alert" style="margin:0 0 16px"></div>
 
   <div class="panel">
     <div class="tabs" role="tablist">
@@ -129,6 +130,13 @@
     <div class="actions">
       <button type="button" class="btn" id="copy">Copiar</button>
       <button type="button" class="btn hidden" id="reveal">Mostrar texto</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="align-items:center">
+      <div class="small" id="selfTestStatus" style="flex:3 1 300px">Autoprueba: ejecutando…</div>
+      <div style="flex:0 0 auto"><button type="button" class="btn" id="selfTestBtn">Ejecutar autoprueba</button></div>
     </div>
   </div>
 
@@ -223,10 +231,11 @@
   }
 
   // ---------- cifrar / descifrar ----------
-  async function encrypt(plaintext, password, algId, kdfId, iter) {
+  // "fixed" (sal e IV fijos) solo lo usa la autoprueba; en uso normal siempre son aleatorios.
+  async function encrypt(plaintext, password, algId, kdfId, iter, fixed) {
     const data = te.encode(plaintext);
     const L = Math.max(BLOCK, Math.ceil((data.length + 4) / BLOCK) * BLOCK);
-    const salt = rand(SALT_LEN), iv = rand(IV_LEN);
+    const salt = fixed ? fixed.salt : rand(SALT_LEN), iv = fixed ? fixed.iv : rand(IV_LEN);
     const raw = await deriveRaw(password, salt, kdfId, iter);
     const { encKey, macKey } = await keysFor(raw, algId);
     raw.fill(0);
@@ -430,8 +439,62 @@
     else if (hiddenAt && Date.now() - hiddenAt > 5 * 60 * 1000) { $("clear").click(); showMsg("warn", "Se borró todo por inactividad (pestaña oculta más de 5 minutos)."); }
   });
 
+  // ---------- autoprueba ----------
+  // Vectores fijos generados con una implementación independiente del mismo formato.
+  // Si el navegador cambiara el resultado de algún algoritmo, esto lo detecta.
+  const TEST_PW = "clave-de-prueba", TEST_ITER = 1000;
+  const TEST_TEXT = "Autoprueba Cypher ✓ ñ 🔑 0123456789";
+  const TEST_SALT = Uint8Array.from({ length: 16 }, (_, i) => i + 1);      // 01 02 … 10
+  const TEST_IV = Uint8Array.from({ length: 16 }, (_, i) => 0xA0 + i);     // A0 A1 … AF
+  const TEST_VECTORS = [
+      [1, 1, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq8rCvrERx0_KIUDvhqAYZ7tQ1FvbvkLe7gWpwPoT5O6e5DZ0XEMxNXTZNxYnBoufYCJGeqrJab841A_MpffLdFMWrFZIP6Z1uQgzkq_lQb1UbcQZO_vzuU2XYmqzf5W2Cl8xOhLL8FiUQuoLsmP6NtO"],
+      [2, 1, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq8IdniDESCRk7aoWI2_joDR1wjXG9tWUlSdh3M18_SVkYtNvFG-Vonr6P0WBvjge53jL3iUtg59VXJLE1Hv6sxWeXkfZgYoHQhWDLiEoeaZEoP0D7exeBHmVh-vND8OhmcgYLfd4-wnUYSW1K9AnJIt"],
+      [3, 1, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq_X1nuAIsskAZSEaTpPDPrFNDga8U-BQFkBc-cPrxf7RjxY27c6PfhwUJTf31N7ZhVHAHxDFnGjXjdj4syXDvQBWz8ZBY1DanFSt20fkWYjqaQPNt2uKEQAoLc5GE-DrLcTIbBwa51S_5VGNkffpbEW"],
+      [1, 2, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq-AiNxKXKz4V84wfu-LukDkajYYfkJClLaEgryGLO3mYT406GK4ny7KGRvGjiTM9iP32qqRHKiS7REWXpGBo0wrKSIcDzSrbMqzkN7ZTEamldo-8KwKL5ZdjulLMKfZQFQeOXgpjxLxt3_-sqYGt_Mq"],
+      [2, 2, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq-1xQ5P-aBKmu792pe81zsoWq1bEBRIiz9pxp6uWvfnCOdK0ZuHj62VOM4gTMMMMXPZaYc6vuoat-_AVDEoaTw0AtYb4UuQLk78-uEBDVa_dYz9movSpWrH05ChSlEF-Z4mpo4_lSq_rORcBoHmgA4p"],
+      [3, 2, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq_ldKOE819-6amPhNKf2Y0YXedBOBEspx1sRGhhCnQ1TuqWbGgM3je3oD7awjuSiD8paEXPNbJM4dDCS-8xaOMfPcaIs9CYY1IQ_voqNn-y0bSW7HvtNSdhNArJB-OhijObYM-BfcyttiexYnNyg4u9"],
+  ];
+  async function selfTest() {
+    const btn = $("selfTestBtn"), status = $("selfTestStatus"), alert = $("selfTestAlert");
+    btn.disabled = true; status.textContent = "Autoprueba: ejecutando…"; status.style.color = "";
+    const t0 = performance.now();
+    const fails = [];
+    for (const [algId, kdfId, vec] of TEST_VECTORS) {
+      const label = ALGS[algId].name + " / PBKDF2-" + KDFS[kdfId];
+      try {
+        // 1) Descifrar un texto fijo conocido.
+        if (await decrypt(vec, TEST_PW, algId, kdfId, TEST_ITER) !== TEST_TEXT) throw new Error("resultado distinto");
+        // 2) Con la clave incorrecta tiene que fallar.
+        let rejected = false;
+        try { await decrypt(vec, TEST_PW + "x", algId, kdfId, TEST_ITER); } catch { rejected = true; }
+        if (!rejected) throw new Error("aceptó una clave incorrecta");
+        // 3) Cifrar con la misma sal e IV del vector tiene que dar exactamente el mismo texto cifrado.
+        const fixed = { salt: TEST_SALT, iv: TEST_IV };
+        if (await encrypt(TEST_TEXT, TEST_PW, algId, kdfId, TEST_ITER, fixed) !== vec) throw new Error("el cifrado no coincide con el texto cifrado esperado");
+        // 4) Cifrar y descifrar de nuevo con sal e IV aleatorios.
+        const ct = await encrypt(TEST_TEXT, TEST_PW, algId, kdfId, TEST_ITER);
+        if (ct.length !== vec.length) throw new Error("largo de salida distinto");
+        if (await decrypt(ct, TEST_PW, algId, kdfId, TEST_ITER) !== TEST_TEXT) throw new Error("ida y vuelta falló");
+      } catch (e) { fails.push(label + " (" + (e && e.message ? e.message : e) + ")"); }
+    }
+    const ms = Math.round(performance.now() - t0);
+    if (fails.length) {
+      status.textContent = "Autoprueba: FALLÓ en " + fails.length + " de " + TEST_VECTORS.length + " combinaciones.";
+      status.style.color = "var(--err)";
+      alert.className = "msg show err";
+      alert.textContent = "La autoprueba falló: este navegador no produce los resultados esperados. No cifres nada nuevo acá; probá con otro navegador. Detalle: " + fails.join("; ");
+    } else {
+      status.textContent = "Autoprueba OK: las " + TEST_VECTORS.length + " combinaciones de algoritmo y derivación funcionan correctamente (" + ms + " ms).";
+      status.style.color = "var(--ok)";
+      alert.className = "msg"; alert.textContent = "";
+    }
+    btn.disabled = false;
+  }
+  $("selfTestBtn").onclick = selfTest;
+
   setMode("enc");
   updateMeter();
+  selfTest();
 })();
 </script>
 </body>
