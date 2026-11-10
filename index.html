@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Bloquea toda conexión de red: la página no puede enviar nada a ningún lado. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Cifrador con clave maestra</title>
+<style>
+  :root {
+    --bg: #0f1216; --panel: #171b21; --line: #2a313b; --text: #e6e9ee; --muted: #8b95a3;
+    --accent: #4f8cff; --ok: #2fb46e; --warn: #e0a526; --err: #e5534b;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f4f6f9; --panel: #ffffff; --line: #d6dbe3; --text: #1b2028; --muted: #5d6775; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  label { display: block; font-weight: 600; font-size: 13px; margin: 0 0 6px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row > div { flex: 1 1 200px; }
+  input, select, textarea, button { font: inherit; color: inherit; }
+  input[type=password], input[type=text], input[type=number], select, textarea {
+    width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px;
+  }
+  textarea { min-height: 150px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .pw { position: relative; }
+  .pw input { padding-right: 70px; }
+  .pw button { position: absolute; right: 4px; top: 4px; bottom: 4px; padding: 0 10px; background: transparent; border: 0; color: var(--muted); cursor: pointer; }
+  .meter { height: 6px; background: var(--line); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .meter > i { display: block; height: 100%; width: 0; transition: width .2s, background .2s; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 4px; min-height: 18px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tabs button { flex: 1; padding: 10px; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; cursor: pointer; font-weight: 600; }
+  .tabs button[aria-selected=true] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .btn { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn:disabled { opacity: .6; cursor: wait; }
+  .msg { margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 14px; display: none; }
+  .msg.show { display: block; }
+  .msg.ok { background: color-mix(in srgb, var(--ok) 15%, transparent); border: 1px solid var(--ok); }
+  .msg.err { background: color-mix(in srgb, var(--err) 15%, transparent); border: 1px solid var(--err); }
+  .msg.warn { background: color-mix(in srgb, var(--warn) 15%, transparent); border: 1px solid var(--warn); }
+  details { margin-top: 4px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .small { font-size: 12px; color: var(--muted); }
+  .hidden { display: none; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Cifrador con clave maestra</h1>
+  <p class="sub">Todo ocurre en tu navegador. Nada se guarda ni se envía: esta página tiene la red bloqueada.</p>
+
+  <div class="panel">
+    <div class="tabs" role="tablist">
+      <button type="button" id="tabEnc" role="tab" aria-selected="true">Cifrar</button>
+      <button type="button" id="tabDec" role="tab" aria-selected="false">Descifrar</button>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="pw">Clave maestra</label>
+        <div class="pw">
+          <input type="password" id="pw" autocomplete="off" spellcheck="false">
+          <button type="button" data-toggle="pw">Mostrar</button>
+        </div>
+        <div class="meter"><i id="meterBar"></i></div>
+        <div class="hint" id="meterText"></div>
+      </div>
+      <div id="confirmBox">
+        <label for="pw2">Repetir clave (evita errores de tipeo)</label>
+        <div class="pw">
+          <input type="password" id="pw2" autocomplete="off" spellcheck="false">
+          <button type="button" data-toggle="pw2">Mostrar</button>
+        </div>
+        <div class="hint" id="matchText"></div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:8px">
+      <div>
+        <label for="alg">Algoritmo</label>
+        <select id="alg">
+          <option value="1" selected>AES-256-GCM</option>
+          <option value="2">AES-256-CBC + HMAC-SHA256</option>
+          <option value="3">AES-256-CTR + HMAC-SHA256</option>
+        </select>
+      </div>
+      <div>
+        <label for="kdf">Derivación de clave</label>
+        <select id="kdf">
+          <option value="1" selected>PBKDF2-SHA256</option>
+          <option value="2">PBKDF2-SHA512</option>
+        </select>
+      </div>
+      <div>
+        <label for="iter">Iteraciones</label>
+        <input type="number" id="iter" min="100000" max="10000000" step="1" value="400000" inputmode="numeric">
+      </div>
+    </div>
+    <p class="small" id="decNote" style="display:none;margin:8px 0 0">El texto cifrado no indica qué algoritmo, derivación ni iteraciones se usaron: tenés que elegir exactamente los mismos que al cifrar.</p>
+
+    <div style="margin-top:12px">
+      <label for="input" id="inputLabel">Texto a cifrar</label>
+      <textarea id="input" spellcheck="false" placeholder="Escribí o pegá el texto…"></textarea>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="btn primary" id="run">Cifrar</button>
+      <button type="button" class="btn" id="swap" title="Pasa el resultado a la entrada y cambia de modo">Usar resultado como entrada</button>
+      <button type="button" class="btn" id="clear">Borrar todo</button>
+    </div>
+    <div class="msg" id="msg" role="status"></div>
+  </div>
+
+  <div class="panel">
+    <label for="output">Resultado</label>
+    <textarea id="output" readonly spellcheck="false"></textarea>
+    <div class="actions">
+      <button type="button" class="btn" id="copy">Copiar</button>
+      <button type="button" class="btn hidden" id="reveal">Mostrar texto</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <details>
+      <summary>Cómo funciona y formato del texto cifrado</summary>
+      <p class="small">La clave maestra se convierte en una clave de 256 bits con PBKDF2 y una sal aleatoria de 16 bytes. Cada cifrado usa un IV/nonce aleatorio nuevo, así que cifrar dos veces el mismo texto da resultados distintos. Los tres modos están autenticados: si alguien altera un solo carácter del texto cifrado, o la clave es incorrecta, el descifrado falla en vez de devolver basura.</p>
+      <p class="small">Formato: Base64URL de [sal (16 bytes), IV (16 bytes), datos cifrados]. No hay cabecera ni marcas: los tres algoritmos producen salidas del mismo largo y que parecen bytes aleatorios, así que no se puede saber cuál se usó. El texto se rellena a bloques de 32 bytes para no revelar su largo exacto. Las iteraciones de PBKDF2 se eligen entre 100.000 y 10.000.000 y tampoco quedan guardadas. Usa solo la Web Crypto API del navegador, sin librerías externas.</p>
+    </details>
+  </div>
+</main>
+
+<script>
+"use strict";
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const te = new TextEncoder();
+  const td = new TextDecoder("utf-8", { fatal: true });
+
+  // Formato (sin cabecera ni marcas): sal(16) | iv(16) | cuerpo.
+  // El cuerpo mide siempre L + 48 bytes (L = texto rellenado a múltiplos de 32),
+  // sea cual sea el algoritmo, así que las salidas son indistinguibles.
+  const MIN_ITER = 100000, MAX_ITER = 10000000;
+  const SALT_LEN = 16, IV_LEN = 16, MAC_LEN = 32, BLOCK = 32, OVERHEAD = 48;
+  const ALGS = {
+    1: { name: "AES-256-GCM", extra: 32 },               // L+32 de texto -> +16 de tag = L+48
+    2: { name: "AES-256-CBC + HMAC-SHA256", extra: 0 },  // L -> +16 de padding PKCS#7 + 32 HMAC = L+48
+    3: { name: "AES-256-CTR + HMAC-SHA256", extra: 16 }, // L+16 -> +32 HMAC = L+48
+  };
+  const KDFS = { 1: "SHA-256", 2: "SHA-512" };
+
+  class UserError extends Error {}
+
+  // ---------- utilidades ----------
+  function b64urlEncode(bytes) {
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function b64urlDecode(str) {
+    const clean = str.replace(/\s+/g, "");
+    if (!/^[A-Za-z0-9_-]*$/.test(clean)) throw new UserError("El texto cifrado contiene caracteres inválidos. ¿Lo copiaste completo y sin modificar?");
+    if (clean.length % 4 === 1) throw new UserError("El texto cifrado está incompleto (longitud inválida). Revisá que lo hayas copiado entero.");
+    const b64 = clean.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((clean.length + 3) % 4);
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function concat(...arrs) {
+    const out = new Uint8Array(arrs.reduce((n, a) => n + a.length, 0));
+    let o = 0; for (const a of arrs) { out.set(a, o); o += a.length; }
+    return out;
+  }
+  const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
+
+  // Relleno: [largo (4 bytes)] [texto] [ceros] hasta el tamaño pedido.
+  function pad(data, size) {
+    const out = new Uint8Array(size);
+    new DataView(out.buffer).setUint32(0, data.length, false);
+    out.set(data, 4);
+    return out;
+  }
+  function unpad(buf) {
+    if (buf.length < 4) return null;
+    const n = new DataView(buf.buffer, buf.byteOffset).getUint32(0, false);
+    if (n > buf.length - 4) return null;
+    for (let i = 4 + n; i < buf.length; i++) if (buf[i] !== 0) return null;
+    return buf.subarray(4, 4 + n);
+  }
+
+  // ---------- claves ----------
+  // Una sola derivación de 512 bits: 256 para cifrar y 256 para HMAC.
+  async function deriveRaw(password, salt, kdfId, iter) {
+    const base = await crypto.subtle.importKey("raw", te.encode(password), "PBKDF2", false, ["deriveBits"]);
+    return new Uint8Array(await crypto.subtle.deriveBits(
+      { name: "PBKDF2", hash: KDFS[kdfId], salt, iterations: iter }, base, 512));
+  }
+  async function keysFor(raw, algId) {
+    const cipherName = algId === 1 ? "AES-GCM" : algId === 2 ? "AES-CBC" : "AES-CTR";
+    const encKey = await crypto.subtle.importKey("raw", raw.subarray(0, 32), cipherName, false, ["encrypt", "decrypt"]);
+    const macKey = algId === 1 ? null :
+      await crypto.subtle.importKey("raw", raw.subarray(32, 64), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+    return { encKey, macKey };
+  }
+  // El número de algoritmo entra en la autenticación pero NO se guarda en la salida.
+  const authData = (algId, salt, iv) => concat(new Uint8Array([algId]), salt, iv);
+  function cipherParams(algId, iv, aad) {
+    if (algId === 1) return { name: "AES-GCM", iv: iv.subarray(0, 12), additionalData: aad, tagLength: 128 };
+    if (algId === 2) return { name: "AES-CBC", iv };
+    return { name: "AES-CTR", counter: iv, length: 64 };
+  }
+
+  // ---------- cifrar / descifrar ----------
+  async function encrypt(plaintext, password, algId, kdfId, iter) {
+    const data = te.encode(plaintext);
+    const L = Math.max(BLOCK, Math.ceil((data.length + 4) / BLOCK) * BLOCK);
+    const salt = rand(SALT_LEN), iv = rand(IV_LEN);
+    const raw = await deriveRaw(password, salt, kdfId, iter);
+    const { encKey, macKey } = await keysFor(raw, algId);
+    raw.fill(0);
+    const aad = authData(algId, salt, iv);
+    let body = new Uint8Array(await crypto.subtle.encrypt(cipherParams(algId, iv, aad), encKey, pad(data, L + ALGS[algId].extra)));
+    if (macKey) body = concat(body, new Uint8Array(await crypto.subtle.sign("HMAC", macKey, concat(aad, body))));
+    if (body.length !== L + OVERHEAD) throw new Error("Largo de salida inesperado.");
+    return b64urlEncode(concat(salt, iv, body));
+  }
+
+  async function tryAlg(raw, algId, salt, iv, body) {
+    const { encKey, macKey } = await keysFor(raw, algId);
+    const aad = authData(algId, salt, iv);
+    let ct = body;
+    if (macKey) {
+      ct = body.subarray(0, body.length - MAC_LEN);
+      const ok = await crypto.subtle.verify("HMAC", macKey, body.subarray(body.length - MAC_LEN), concat(aad, ct));
+      if (!ok) return null;
+    }
+    let pt;
+    try { pt = new Uint8Array(await crypto.subtle.decrypt(cipherParams(algId, iv, aad), encKey, ct)); }
+    catch { return null; }
+    return unpad(pt);
+  }
+
+  async function decrypt(token, password, algId, kdfId, iter) {
+    const s = token.trim();
+    if (!s) throw new UserError("Pegá el texto cifrado en la entrada.");
+    const blob = b64urlDecode(s);
+    const bodyLen = blob.length - SALT_LEN - IV_LEN;
+    if (bodyLen < BLOCK + OVERHEAD || (bodyLen - OVERHEAD) % BLOCK !== 0)
+      throw new UserError("Esto no parece un texto cifrado por esta herramienta, o está incompleto.");
+    const salt = blob.subarray(0, SALT_LEN);
+    const iv = blob.subarray(SALT_LEN, SALT_LEN + IV_LEN);
+    const body = blob.subarray(SALT_LEN + IV_LEN);
+    const raw = await deriveRaw(password, salt, kdfId, iter);
+    let data;
+    try { data = await tryAlg(raw, algId, salt, iv, body); } finally { raw.fill(0); }
+    if (!data) throw new UserError("No se pudo descifrar. Revisá la clave, el algoritmo, la derivación y las iteraciones: tienen que ser exactamente los mismos que al cifrar. También puede ser que el texto se haya modificado.");
+    try { return td.decode(data); }
+    catch { throw new UserError("El contenido descifrado no es texto UTF-8 válido."); }
+  }
+
+  // ---------- fortaleza de la clave (estimación simple) ----------
+  function strength(pw) {
+    if (!pw) return { bits: 0, label: "" };
+    let pool = 0;
+    if (/[a-z]/.test(pw)) pool += 26;
+    if (/[A-Z]/.test(pw)) pool += 26;
+    if (/[0-9]/.test(pw)) pool += 10;
+    if (/[^A-Za-z0-9]/.test(pw)) pool += 33;
+    let bits = pw.length * Math.log2(Math.max(pool, 2));
+    if (/^(.)\1+$/.test(pw)) bits = 4;
+    if (/(1234|abcd|qwer|asdf|password|contrase|admin|0000)/i.test(pw)) bits = Math.min(bits, 28);
+    let label;
+    if (bits < 40) label = "Muy débil: se puede adivinar con fuerza bruta.";
+    else if (bits < 60) label = "Débil: insuficiente para proteger contraseñas.";
+    else if (bits < 80) label = "Aceptable. Mejor si es más larga.";
+    else label = "Fuerte.";
+    return { bits, label };
+  }
+
+  // ---------- interfaz ----------
+  let mode = "enc";
+  let revealTimer = null;
+  const ui = {
+    pw: $("pw"), pw2: $("pw2"), input: $("input"), output: $("output"), msg: $("msg"),
+    run: $("run"), alg: $("alg"), kdf: $("kdf"), iter: $("iter"),
+  };
+
+  function showMsg(kind, text) {
+    ui.msg.className = "msg show " + kind;
+    ui.msg.textContent = text;
+  }
+  function hideMsg() { ui.msg.className = "msg"; ui.msg.textContent = ""; }
+
+  function setOutputSecret(isSecret) {
+    // Al descifrar, el resultado se muestra oculto hasta que se pida verlo.
+    $("reveal").classList.toggle("hidden", !isSecret);
+    ui.output.style.webkitTextSecurity = isSecret ? "disc" : "";
+    ui.output.dataset.secret = isSecret ? "1" : "";
+    $("reveal").textContent = "Mostrar texto";
+  }
+
+  function setMode(m) {
+    mode = m;
+    const enc = m === "enc";
+    $("tabEnc").setAttribute("aria-selected", enc);
+    $("tabDec").setAttribute("aria-selected", !enc);
+    $("confirmBox").style.display = enc ? "" : "none";
+    $("decNote").style.display = enc ? "none" : "";
+    $("inputLabel").textContent = enc ? "Texto a cifrar" : "Texto cifrado";
+    ui.input.placeholder = enc ? "Escribí o pegá el texto…" : "Pegá el texto cifrado…";
+    ui.run.textContent = enc ? "Cifrar" : "Descifrar";
+    hideMsg();
+    updateMatch();
+  }
+
+  function updateMeter() {
+    const { bits, label } = strength(ui.pw.value);
+    const pct = Math.min(100, bits / 100 * 100);
+    const bar = $("meterBar");
+    bar.style.width = pct + "%";
+    bar.style.background = bits < 40 ? "var(--err)" : bits < 60 ? "var(--warn)" : "var(--ok)";
+    $("meterText").textContent = ui.pw.value ? label + " (~" + Math.round(bits) + " bits)" : "Usá una frase larga: 4–6 palabras al azar o 16+ caracteres.";
+  }
+  function updateMatch() {
+    const t = $("matchText");
+    if (mode !== "enc" || !ui.pw2.value) { t.textContent = ""; return; }
+    t.textContent = ui.pw.value === ui.pw2.value ? "Coinciden." : "No coinciden.";
+    t.style.color = ui.pw.value === ui.pw2.value ? "var(--ok)" : "var(--err)";
+  }
+
+  async function run() {
+    hideMsg();
+    const pw = ui.pw.value;
+    const input = ui.input.value;
+    try {
+      if (!window.crypto || !crypto.subtle) throw new UserError("Este navegador no ofrece Web Crypto. Abrí la página por https:// o como archivo local en un navegador moderno.");
+      if (!pw) throw new UserError("Ingresá la clave maestra.");
+      const algId = Number(ui.alg.value), kdfId = Number(ui.kdf.value);
+      const iterStr = ui.iter.value.trim();
+      const iter = Number(iterStr);
+      if (!/^\d+$/.test(iterStr) || iter < MIN_ITER || iter > MAX_ITER)
+        throw new UserError("Las iteraciones deben ser un número entero entre 100.000 y 10.000.000 (sin puntos ni comas).");
+      if (mode === "enc") {
+        if (pw !== ui.pw2.value) throw new UserError("Las claves no coinciden. Si cifrás con una clave mal tipeada, no vas a poder descifrar después.");
+        if (!input) throw new UserError("Escribí el texto a cifrar.");
+        ui.run.disabled = true; ui.run.textContent = "Cifrando…";
+        const out = await encrypt(input, pw, algId, kdfId, iter);
+        // Verificación: se descifra de nuevo para confirmar que el resultado es recuperable.
+        const check = await decrypt(out, pw, algId, kdfId, iter);
+        if (check !== input) throw new Error("La verificación posterior al cifrado falló.");
+        setOutputSecret(false);
+        ui.output.value = out;
+        const s = strength(pw);
+        if (s.bits < 60) showMsg("warn", "Cifrado y verificado, pero la clave es débil: alguien con el texto cifrado podría adivinarla.");
+        else showMsg("ok", "Cifrado y verificado con " + ALGS[algId].name + ", PBKDF2-" + KDFS[kdfId] + " y " + iter.toLocaleString("es") + " iteraciones. El texto no guarda estos datos: para descifrarlo vas a necesitar los mismos.");
+      } else {
+        ui.run.disabled = true; ui.run.textContent = "Descifrando…";
+        const text = await decrypt(input, pw, algId, kdfId, iter);
+        ui.output.value = text;
+        setOutputSecret(true);
+        showMsg("ok", "Descifrado correctamente.");
+      }
+    } catch (e) {
+      ui.output.value = "";
+      setOutputSecret(false);
+      if (e instanceof UserError) showMsg("err", e.message);
+      else { showMsg("err", "Error inesperado: " + (e && e.message ? e.message : e)); console.error(e); }
+    } finally {
+      ui.run.disabled = false; ui.run.textContent = mode === "enc" ? "Cifrar" : "Descifrar";
+    }
+  }
+
+  $("tabEnc").onclick = () => setMode("enc");
+  $("tabDec").onclick = () => setMode("dec");
+  ui.run.onclick = run;
+  ui.pw.addEventListener("input", () => { updateMeter(); updateMatch(); });
+  ui.pw2.addEventListener("input", updateMatch);
+  [ui.pw, ui.pw2].forEach((el) => el.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); }));
+  ui.input.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) run(); });
+  document.querySelectorAll("[data-toggle]").forEach((b) => b.onclick = () => {
+    const el = $(b.dataset.toggle);
+    const show = el.type === "password";
+    el.type = show ? "text" : "password";
+    b.textContent = show ? "Ocultar" : "Mostrar";
+  });
+  $("reveal").onclick = () => {
+    const hidden = ui.output.dataset.secret === "1";
+    ui.output.style.webkitTextSecurity = hidden ? "" : "disc";
+    ui.output.dataset.secret = hidden ? "" : "1";
+    $("reveal").textContent = hidden ? "Ocultar texto" : "Mostrar texto";
+  };
+  $("copy").onclick = async () => {
+    if (!ui.output.value) { showMsg("err", "No hay resultado para copiar."); return; }
+    try {
+      await navigator.clipboard.writeText(ui.output.value);
+      showMsg("ok", "Copiado al portapapeles." + (mode === "dec" ? " Recordá que queda en el portapapeles hasta que copies otra cosa." : ""));
+    } catch {
+      ui.output.focus(); ui.output.select();
+      showMsg("warn", "El navegador no permitió copiar automáticamente. El texto quedó seleccionado: usá Ctrl+C.");
+    }
+  };
+  $("swap").onclick = () => {
+    if (!ui.output.value) { showMsg("err", "No hay resultado para usar."); return; }
+    ui.input.value = ui.output.value;
+    ui.output.value = "";
+    setOutputSecret(false);
+    setMode(mode === "enc" ? "dec" : "enc");
+  };
+  $("clear").onclick = () => {
+    ui.pw.value = ui.pw2.value = ui.input.value = ui.output.value = "";
+    setOutputSecret(false); hideMsg(); updateMeter(); updateMatch();
+  };
+  // Limpia todo al cerrar o al quedar la pestaña oculta por mucho tiempo.
+  window.addEventListener("pagehide", () => $("clear").click());
+  let hiddenAt = 0;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) hiddenAt = Date.now();
+    else if (hiddenAt && Date.now() - hiddenAt > 5 * 60 * 1000) { $("clear").click(); showMsg("warn", "Se borró todo por inactividad (pestaña oculta más de 5 minutos)."); }
+  });
+
+  setMode("enc");
+  updateMeter();
+})();
+</script>
+</body>
+</html>
