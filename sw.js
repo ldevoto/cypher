@@ -1,8 +1,8 @@
 // Service worker: guarda la app para que funcione sin internet.
 // Cambiá VERSION en cada publicación para que los dispositivos bajen la versión nueva.
-const VERSION = "cypher-v1.0.1";
+const VERSION = "cypher-v1.0.2";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "config.js", "manifest.webmanifest",
-  "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon.png"];
+  "cifrador.html", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: "reload" })))));
@@ -18,7 +18,10 @@ self.addEventListener("fetch", (e) => {
   // Solo archivos propios de la app. Google (inicio de sesión y Drive) va siempre directo a la red.
   if (req.method !== "GET" || url.origin !== self.location.origin) return;
   if (req.mode === "navigate") {
-    e.respondWith(caches.match("index.html").then((r) => r || fetch(req)));
+    // La raíz abre la app; cualquier otro archivo (ej. cifrador.html) se sirve tal cual.
+    const isRoot = url.pathname.endsWith("/") || url.pathname.endsWith("/index.html");
+    e.respondWith(caches.match(isRoot ? "index.html" : req, { ignoreSearch: true })
+      .then((r) => r || fetch(req).catch(() => caches.match("index.html"))));
     return;
   }
   e.respondWith(caches.match(req, { ignoreSearch: true }).then((r) => r || fetch(req)));
