@@ -53,6 +53,7 @@
   summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   .small { font-size: 12px; color: var(--muted); }
   .hidden { display: none; }
+  [hidden] { display: none !important; }
   .gen-opts { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-bottom: 8px; }
   .gen-opts label { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; margin: 0; cursor: pointer; }
   .st-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; }
@@ -85,7 +86,7 @@
       <button type="button" class="btn" id="selfTestBtn">Ejecutar autoprueba</button>
     </summary>
     <div class="st-grid" id="selfTestGrid"></div>
-    <div class="st-legend">Chequeos por combinación: ① descifra el texto fijo · ② rechaza una clave incorrecta · ③ cifrar da exactamente el texto fijo · ④ cifra y descifra con datos al azar. Pasá el mouse por un punto para ver el detalle.</div>
+    <div class="st-legend">Cifrado: ① descifra el texto fijo · ② rechaza una clave incorrecta · ③ cifrar da exactamente el texto fijo · ④ cifra y descifra con datos al azar.<br>Generador: ① el navegador da números aleatorios seguros · ② respeta largo y caracteres permitidos · ③ incluye al menos uno de cada tipo · ④ 200 contraseñas distintas que usan todos los caracteres. Pasá el mouse por un punto para ver el detalle.</div>
     <details id="selfTestHelp" style="margin-top:10px">
       <summary>¿Qué hago si algún punto sale en rojo?</summary>
       <div class="small" style="margin-top:6px">
@@ -101,6 +102,7 @@
           <li><b>①</b> (no descifra el texto fijo): en este navegador probablemente no puedas descifrar esos textos. Hacelo desde un navegador donde ① salga verde.</li>
           <li><b>②</b> (acepta una clave incorrecta): no confíes en ningún resultado de este navegador para esa combinación, aunque parezca correcto.</li>
           <li><b>③ o ④</b> con ① en verde: tus textos existentes se descifran bien, pero lo que cifres acá podría no poder descifrarse en otro navegador o más adelante. Si cifraste algo nuevo en este navegador, verificá que se descifre en otro.</li>
+          <li><b>Generador en rojo</b>: no generes contraseñas en este navegador; las que ya generaste y guardaste siguen sirviendo. Generalas en otro navegador donde salga verde. No afecta al cifrado.</li>
           <li><b>Todos en rojo</b>: el navegador no ofrece Web Crypto o está muy desactualizado. Actualizalo o usá otro.</li>
         </ul>
         <p style="margin:4px 0">Guardá siempre una copia de este <code>index.html</code> junto a tu anotador: abierta como archivo local funciona igual y no depende del hosting.</p>
@@ -114,7 +116,10 @@
     <div class="tabs" role="tablist">
       <button type="button" id="tabEnc" role="tab" aria-selected="true">Cifrar</button>
       <button type="button" id="tabDec" role="tab" aria-selected="false">Descifrar</button>
+      <button type="button" id="tabGen" role="tab" aria-selected="false">Generar contraseña</button>
     </div>
+
+    <div id="cryptoView">
 
     <div class="row">
       <div>
@@ -170,22 +175,12 @@
       <button type="button" class="btn" id="clear">Borrar todo</button>
     </div>
     <div class="msg" id="msg" role="status"></div>
-  </div>
-
-  <div class="panel">
-    <label for="output">Resultado</label>
-    <textarea id="output" readonly spellcheck="false"></textarea>
-    <div class="actions">
-      <button type="button" class="btn" id="copy">Copiar</button>
-      <button type="button" class="btn hidden" id="reveal">Mostrar texto</button>
     </div>
-  </div>
 
-  <div class="panel">
-    <label>Generador de contraseñas</label>
+    <div id="genView" hidden>
     <div class="row" style="align-items:flex-end">
       <div style="flex:0 1 140px">
-        <label for="genLen" style="font-weight:400">Longitud (8 a 128)</label>
+        <label for="genLen">Longitud (8 a 128)</label>
         <input type="number" id="genLen" min="8" max="128" step="1" value="20" inputmode="numeric">
       </div>
       <div style="flex:3 1 380px" class="gen-opts">
@@ -196,19 +191,32 @@
       </div>
     </div>
     <div style="margin-top:8px">
-      <label for="genSymbolSet" style="font-weight:400">Símbolos permitidos (editalos si el sitio no acepta alguno)</label>
+      <label for="genSymbolSet">Símbolos permitidos (editalos si el sitio no acepta alguno)</label>
       <input type="text" id="genSymbolSet" spellcheck="false" autocomplete="off" value="!@#$%^&amp;*()-_=+[]{};:,.?/~">
     </div>
     <div style="margin-top:12px">
-      <input type="text" id="genOut" readonly spellcheck="false" autocomplete="off" placeholder="Tocá Generar" style="font-family:ui-monospace,Consolas,monospace;font-size:16px">
-      <div class="hint" id="genInfo"></div>
+      <label for="genOut">Contraseña generada</label>
+      <div class="pw">
+        <input type="password" id="genOut" readonly spellcheck="false" autocomplete="off" placeholder="Tocá Generar y copiar" style="font-family:ui-monospace,Consolas,monospace;font-size:16px">
+        <button type="button" data-toggle="genOut">Mostrar</button>
+      </div>
+      <div class="hint" id="genInfo">Cada vez que generás sale una contraseña nueva e irrepetible: guardala antes de generar otra.</div>
     </div>
     <div class="actions">
-      <button type="button" class="btn primary" id="genRun">Generar</button>
-      <button type="button" class="btn" id="genCopy">Copiar</button>
-      <button type="button" class="btn" id="genUse" title="Agrega la contraseña al final del texto a cifrar">Agregar al texto a cifrar</button>
+      <button type="button" class="btn primary" id="genRun">Generar y copiar</button>
+      <button type="button" class="btn" id="genUse" title="Pasa a Cifrar y agrega la contraseña al final del texto">Agregar al texto a cifrar</button>
     </div>
     <div class="msg" id="genMsg" role="status"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="resultPanel">
+    <label for="output">Resultado</label>
+    <textarea id="output" readonly spellcheck="false"></textarea>
+    <div class="actions">
+      <button type="button" class="btn" id="copy">Copiar</button>
+      <button type="button" class="btn hidden" id="reveal">Mostrar texto</button>
+    </div>
   </div>
 
   <div class="panel">
@@ -393,9 +401,14 @@
 
   function setMode(m) {
     mode = m;
-    const enc = m === "enc";
+    const enc = m === "enc", gen = m === "gen";
     $("tabEnc").setAttribute("aria-selected", enc);
-    $("tabDec").setAttribute("aria-selected", !enc);
+    $("tabDec").setAttribute("aria-selected", m === "dec");
+    $("tabGen").setAttribute("aria-selected", gen);
+    $("cryptoView").hidden = gen;
+    $("resultPanel").hidden = gen;
+    $("genView").hidden = !gen;
+    if (gen) { hideMsg(); return; }
     $("confirmBox").style.display = enc ? "" : "none";
     $("decNote").style.display = enc ? "none" : "";
     $("inputLabel").textContent = enc ? "Texto a cifrar" : "Texto cifrado";
@@ -464,6 +477,7 @@
 
   $("tabEnc").onclick = () => setMode("enc");
   $("tabDec").onclick = () => setMode("dec");
+  $("tabGen").onclick = () => setMode("gen");
   ui.run.onclick = run;
   ui.pw.addEventListener("input", () => { updateMeter(); updateMatch(); });
   ui.pw2.addEventListener("input", updateMatch);
@@ -500,7 +514,7 @@
   };
   $("clear").onclick = () => {
     ui.pw.value = ui.pw2.value = ui.input.value = ui.output.value = "";
-    $("genOut").value = ""; $("genInfo").textContent = ""; hideGenMsg();
+    $("genOut").value = ""; $("genOut").type = "password"; document.querySelector('[data-toggle="genOut"]').textContent = "Mostrar"; hideGenMsg();
     setOutputSecret(false); hideMsg(); updateMeter(); updateMatch();
   };
   // ---------- generador de contraseñas ----------
@@ -530,29 +544,40 @@
   }
   function showGenMsg(kind, text) { const m = $("genMsg"); m.className = "msg show " + kind; m.textContent = text; }
   function hideGenMsg() { const m = $("genMsg"); m.className = "msg"; m.textContent = ""; }
-  $("genRun").onclick = () => {
-    hideGenMsg();
+  function genOptions() {
     const lenStr = $("genLen").value.trim(), length = Number(lenStr);
-    if (!/^\d+$/.test(lenStr) || length < 8 || length > 128) { showGenMsg("err", "La longitud debe ser un número entero entre 8 y 128."); return; }
+    if (!/^\d+$/.test(lenStr) || length < 8 || length > 128) throw new UserError("La longitud debe ser un número entero entre 8 y 128.");
     const sets = Object.keys(GEN_SETS).filter((id) => $(id).checked).map((id) => GEN_SETS[id]);
     if ($("genSymbols").checked) {
-      const sym = [...new Set([...$("genSymbolSet").value].filter((c) => c.trim() && !/[A-Za-z0-9]/.test(c)))].join("");
-      if (!sym) { showGenMsg("err", "Elegiste símbolos pero la lista de símbolos permitidos está vacía."); return; }
+      const sym = cleanSymbols($("genSymbolSet").value);
+      if (!sym) throw new UserError("Elegiste símbolos pero la lista de símbolos permitidos está vacía.");
       sets.push(sym);
     }
-    if (!sets.length) { showGenMsg("err", "Elegí al menos un tipo de carácter."); return; }
-    if (length < sets.length) { showGenMsg("err", "La longitud tiene que ser al menos igual a la cantidad de tipos elegidos."); return; }
-    const pw = generatePassword(length, sets);
-    $("genOut").value = pw;
-    const pool = new Set(sets.join("")).size;
-    const bits = Math.round(length * Math.log2(pool));
-    $("genInfo").textContent = "~" + bits + " bits de entropía (" + pool + " caracteres posibles). Cada vez que toques Generar sale una distinta: si la vas a usar, guardala antes.";
-  };
-  $("genCopy").onclick = async () => {
-    const v = $("genOut").value;
-    if (!v) { showGenMsg("err", "Primero generá una contraseña."); return; }
-    try { await navigator.clipboard.writeText(v); showGenMsg("ok", "Copiada al portapapeles."); }
-    catch { $("genOut").focus(); $("genOut").select(); showGenMsg("warn", "El navegador no permitió copiar automáticamente. Quedó seleccionada: usá Ctrl+C."); }
+    if (!sets.length) throw new UserError("Elegí al menos un tipo de carácter.");
+    if (length < sets.length) throw new UserError("La longitud tiene que ser al menos igual a la cantidad de tipos elegidos.");
+    return { length, sets };
+  }
+  const cleanSymbols = (str) => [...new Set([...str].filter((c) => c.trim() && !/[A-Za-z0-9]/.test(c)))].join("");
+  $("genRun").onclick = async () => {
+    hideGenMsg();
+    let opts;
+    try { opts = genOptions(); } catch (e) { showGenMsg("err", e.message); return; }
+    const pw = generatePassword(opts.length, opts.sets);
+    const out = $("genOut");
+    out.value = pw;
+    const pool = new Set(opts.sets.join("")).size;
+    const bits = Math.round(opts.length * Math.log2(pool));
+    $("genInfo").textContent = "~" + bits + " bits de entropía (" + pool + " caracteres posibles). Cada vez que generás sale una nueva e irrepetible: guardala antes de generar otra.";
+    try {
+      await navigator.clipboard.writeText(pw);
+      showGenMsg("ok", "Contraseña nueva generada y copiada al portapapeles.");
+    } catch {
+      // Sin permiso de portapapeles: se muestra para poder copiarla a mano.
+      out.type = "text";
+      document.querySelector('[data-toggle="genOut"]').textContent = "Ocultar";
+      out.focus(); out.select();
+      showGenMsg("warn", "Generada, pero el navegador no permitió copiarla automáticamente. Quedó seleccionada: usá Ctrl+C.");
+    }
   };
   $("genUse").onclick = () => {
     const v = $("genOut").value;
@@ -591,29 +616,16 @@
       [3, 2, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq_ldKOE819-6amPhNKf2Y0YXedBOBEspx1sRGhhCnQ1TuqWbGgM3je3oD7awjuSiD8paEXPNbJM4dDCS-8xaOMfPcaIs9CYY1IQ_voqNn-y0bSW7HvtNSdhNArJB-OhijObYM-BfcyttiexYnNyg4u9"],
   ];
   const CHECKS = ["Descifra el texto fijo", "Rechaza una clave incorrecta", "Cifrar da exactamente el texto fijo", "Cifra y descifra con datos al azar"];
+  const GEN_CHECKS = ["El navegador da números aleatorios seguros", "Respeta largo y caracteres permitidos", "Incluye al menos uno de cada tipo elegido", "200 contraseñas distintas que usan todos los caracteres"];
+  const GEN_TEST_SYMBOLS = "!@#$%^&*()-_=+[]{};:,.?/~";
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  function buildGrid() {
-    const g = $("selfTestGrid");
-    g.textContent = "";
-    const add = (cls, text, title) => { const d = document.createElement("div"); d.className = cls; if (text) d.textContent = text; if (title) d.title = title; g.appendChild(d); return d; };
-    add("", "");
-    ["①", "②", "③", "④"].forEach((n, i) => add("h", n, CHECKS[i]));
-    return TEST_VECTORS.map(([algId, kdfId]) => {
-      add("lbl", ALGS[algId].name + " · PBKDF2-" + KDFS[kdfId]);
-      return CHECKS.map((c) => add("dot", "", c + ": pendiente"));
-    });
-  }
-  async function selfTest() {
-    const btn = $("selfTestBtn"), status = $("selfTestStatus"), alert = $("selfTestAlert");
-    btn.disabled = true; status.textContent = "Autoprueba: ejecutando…"; status.style.color = "";
-    const dots = buildGrid();
-    const fails = [];
-    let ms = 0;
+
+  // Cada fila: una etiqueta y cuatro chequeos (nombre + función que lanza error si falla).
+  function selfTestRows() {
     const fixed = { salt: TEST_SALT, iv: TEST_IV };
-    for (let v = 0; v < TEST_VECTORS.length; v++) {
-      const [algId, kdfId, vec] = TEST_VECTORS[v];
-      const label = ALGS[algId].name + " / PBKDF2-" + KDFS[kdfId];
-      const steps = [
+    const rows = TEST_VECTORS.map(([algId, kdfId, vec]) => ({
+      label: ALGS[algId].name + " · PBKDF2-" + KDFS[kdfId],
+      checks: [
         async () => { if (await decrypt(vec, TEST_PW, algId, kdfId, TEST_ITER) !== TEST_TEXT) throw new Error("resultado distinto"); },
         async () => {
           let rejected = false;
@@ -626,31 +638,87 @@
           if (ct.length !== vec.length) throw new Error("largo de salida distinto");
           if (await decrypt(ct, TEST_PW, algId, kdfId, TEST_ITER) !== TEST_TEXT) throw new Error("ida y vuelta falló");
         },
-      ];
-      for (let i = 0; i < steps.length; i++) {
-        const dot = dots[v][i];
+      ].map((fn, i) => ({ name: CHECKS[i], fn })),
+    }));
+    const all4 = [GEN_SETS.genLower, GEN_SETS.genUpper, GEN_SETS.genDigits, GEN_TEST_SYMBOLS];
+    rows.push({
+      label: "Generador de contraseñas",
+      checks: [
+        async () => {
+          if (!window.crypto || !crypto.getRandomValues) throw new Error("no hay crypto.getRandomValues");
+          const a = crypto.getRandomValues(new Uint8Array(32)), b = crypto.getRandomValues(new Uint8Array(32));
+          if (a.every((x) => x === 0) || a.every((x, i) => x === b[i])) throw new Error("los valores aleatorios no varían");
+        },
+        async () => {
+          const combos = [all4, [GEN_SETS.genLower], [GEN_SETS.genDigits, "-_"], [GEN_SETS.genUpper, GEN_SETS.genLower]];
+          for (const sets of combos) for (const len of [8, 20, 64, 128]) {
+            const pool = sets.join(""), pw = generatePassword(len, sets);
+            if (pw.length !== len) throw new Error("largo " + pw.length + " en vez de " + len);
+            if (![...pw].every((c) => pool.includes(c))) throw new Error("usó un carácter no permitido");
+          }
+        },
+        async () => {
+          for (let i = 0; i < 50; i++) {
+            const pw = generatePassword(8, all4);
+            if (!all4.every((set) => [...pw].some((c) => set.includes(c)))) throw new Error("faltó algún tipo de carácter");
+          }
+        },
+        async () => {
+          const seen = new Set(), used = new Set();
+          for (let i = 0; i < 200; i++) { const pw = generatePassword(20, all4); seen.add(pw); for (const c of pw) used.add(c); }
+          if (seen.size !== 200) throw new Error("se repitieron contraseñas");
+          // 4000 caracteres sorteados entre 87 posibles: que falte alguno es prácticamente imposible si el sorteo es parejo.
+          if (used.size !== new Set(all4.join("")).size) throw new Error("hay caracteres que nunca salieron");
+        },
+      ].map((fn, i) => ({ name: GEN_CHECKS[i], fn })),
+    });
+    return rows;
+  }
+
+  function buildGrid(rows) {
+    const g = $("selfTestGrid");
+    g.textContent = "";
+    const add = (cls, text, title) => { const d = document.createElement("div"); d.className = cls; if (text) d.textContent = text; if (title) d.title = title; g.appendChild(d); return d; };
+    add("", "");
+    ["①", "②", "③", "④"].forEach((n) => add("h", n));
+    return rows.map((row) => {
+      add("lbl", row.label);
+      return row.checks.map((c) => add("dot", "", c.name + ": pendiente"));
+    });
+  }
+  async function selfTest() {
+    const btn = $("selfTestBtn"), status = $("selfTestStatus"), alert = $("selfTestAlert");
+    btn.disabled = true; status.textContent = "Autoprueba: ejecutando…"; status.style.color = "";
+    const rows = selfTestRows();
+    const dots = buildGrid(rows);
+    const fails = [];
+    let ms = 0, total = 0;
+    for (let r = 0; r < rows.length; r++) {
+      for (let i = 0; i < rows[r].checks.length; i++) {
+        const { name, fn } = rows[r].checks[i];
+        const dot = dots[r][i];
+        total++;
         dot.className = "dot run";
         const t0 = performance.now();
         try {
-          await steps[i]();
-          dot.className = "dot ok"; dot.title = CHECKS[i] + ": OK";
+          await fn();
+          dot.className = "dot ok"; dot.title = name + ": OK";
         } catch (e) {
           const why = e && e.message ? e.message : String(e);
-          dot.className = "dot err"; dot.title = CHECKS[i] + ": FALLÓ (" + why + ")";
-          fails.push(label + ", " + CHECKS[i].toLowerCase() + " (" + why + ")");
+          dot.className = "dot err"; dot.title = name + ": FALLÓ (" + why + ")";
+          fails.push(rows[r].label + ", " + name.toLowerCase() + " (" + why + ")");
         }
         ms += performance.now() - t0;
         await sleep(40); // pausa breve solo para que se vea el avance
       }
     }
-    const total = TEST_VECTORS.length * CHECKS.length;
     if (fails.length) {
       status.textContent = "Autoprueba: FALLARON " + fails.length + " de " + total + " chequeos.";
       status.style.color = "var(--err)";
       alert.className = "msg show err";
       $("selfTestHelp").open = true;
       $("selfTestPanel").open = true;
-      alert.textContent = "La autoprueba falló: este navegador no produce los resultados esperados. Tus textos ya cifrados no se dañaron, pero no cifres nada nuevo acá. Abajo están los chequeos que fallaron (pasá el mouse por los puntos rojos para ver el detalle) y qué hacer.";
+      alert.textContent = "La autoprueba falló: este navegador no produce los resultados esperados. Tus textos ya cifrados y tus contraseñas guardadas no se dañaron, pero no cifres ni generes nada nuevo con lo que salió en rojo. Abajo están los chequeos que fallaron (pasá el mouse por los puntos rojos para ver el detalle) y qué hacer.";
       console.warn("Autoprueba:", fails);
     } else {
       status.textContent = "Autoprueba OK: " + total + " de " + total + " chequeos correctos (" + Math.round(ms) + " ms de cálculo).";
@@ -659,7 +727,6 @@
     }
     btn.disabled = false;
   }
-  // El botón está dentro del encabezado colapsable: que no abra/cierre el panel.
   $("selfTestBtn").onclick = (e) => { e.preventDefault(); selfTest(); };
 
   setMode("enc");
