@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Bloquea toda conexión de red: la página no puede enviar nada a ningún lado. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Cypher · cifrado con clave maestra</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%234f8cff%22/%3E%3Cpath%20d%3D%22M22%2028v-6a10%2010%200%200%201%2020%200v6%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%225%22%20stroke-linecap%3D%22round%22/%3E%3Crect%20x%3D%2216%22%20y%3D%2228%22%20width%3D%2232%22%20height%3D%2224%22%20rx%3D%225%22%20fill%3D%22%23fff%22/%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2238%22%20r%3D%223.5%22%20fill%3D%22%234f8cff%22/%3E%3Crect%20x%3D%2230.5%22%20y%3D%2239%22%20width%3D%223%22%20height%3D%227%22%20rx%3D%221.5%22%20fill%3D%22%234f8cff%22/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0f1216; --panel: #171b21; --line: #2a313b; --text: #e6e9ee; --muted: #8b95a3;
+    --accent: #4f8cff; --ok: #2fb46e; --warn: #e0a526; --err: #e5534b;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f4f6f9; --panel: #ffffff; --line: #d6dbe3; --text: #1b2028; --muted: #5d6775; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  label { display: block; font-weight: 600; font-size: 13px; margin: 0 0 6px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row > div { flex: 1 1 200px; }
+  input, select, textarea, button { font: inherit; color: inherit; }
+  input[type=password], input[type=text], input[type=number], select, textarea {
+    width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px;
+  }
+  textarea { min-height: 150px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .pw { position: relative; }
+  .pw input { padding-right: 70px; }
+  .pw button { position: absolute; right: 4px; top: 4px; bottom: 4px; padding: 0 10px; background: transparent; border: 0; color: var(--muted); cursor: pointer; }
+  .meter { height: 6px; background: var(--line); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .meter > i { display: block; height: 100%; width: 0; transition: width .2s, background .2s; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 4px; min-height: 18px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tabs button { flex: 1; padding: 10px; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; cursor: pointer; font-weight: 600; }
+  .tabs button[aria-selected=true] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .btn { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn:disabled { opacity: .6; cursor: wait; }
+  .msg { margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 14px; display: none; }
+  .msg.show { display: block; }
+  .msg.ok { background: color-mix(in srgb, var(--ok) 15%, transparent); border: 1px solid var(--ok); }
+  .msg.err { background: color-mix(in srgb, var(--err) 15%, transparent); border: 1px solid var(--err); }
+  .msg.warn { background: color-mix(in srgb, var(--warn) 15%, transparent); border: 1px solid var(--warn); }
+  details { margin-top: 4px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .small { font-size: 12px; color: var(--muted); }
+  .hidden { display: none; }
+  [hidden] { display: none !important; }
+  .gen-opts { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-bottom: 8px; }
+  .gen-opts label { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; margin: 0; cursor: pointer; }
+  .st-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; }
+  .st-summary::-webkit-details-marker { display: none; }
+  .st-summary::before { content: "▸"; color: var(--muted); transition: transform .15s; }
+  #selfTestPanel[open] > .st-summary::before { transform: rotate(90deg); }
+  .st-summary > span { flex: 1; }
+  .st-grid { display: grid; grid-template-columns: max-content repeat(4, 22px); justify-content: start; gap: 6px 10px; align-items: center; margin-top: 10px; font-size: 12px; }
+  .st-grid .lbl { padding-right: 14px; }
+  .st-grid .h { color: var(--muted); font-size: 13px; text-align: center; justify-self: center; }
+  .st-grid .lbl { color: var(--muted); }
+  .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--line); justify-self: center; transition: background .15s, transform .15s; }
+  .dot.run { background: var(--warn); transform: scale(1.2); }
+  .dot.ok { background: var(--ok); }
+  .dot.err { background: var(--err); }
+  .st-legend { margin-top: 8px; font-size: 12px; color: var(--muted); }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🔐 Cypher</h1>
+  <p class="sub">Cifrá y descifrá texto con tu clave maestra. Todo ocurre en tu navegador. Nada se guarda ni se envía: esta página tiene la red bloqueada.</p>
+  <div class="msg" id="selfTestAlert" role="alert" style="margin:0 0 16px"></div>
+
+  <div class="panel">
+    <details id="selfTestPanel">
+    <summary class="st-summary">
+      <span class="small" id="selfTestStatus">Autoprueba: ejecutando…</span>
+      <button type="button" class="btn" id="selfTestBtn">Ejecutar autoprueba</button>
+    </summary>
+    <div class="st-grid" id="selfTestGrid"></div>
+    <div class="st-legend">Cifrado: ① descifra el texto fijo · ② rechaza una clave incorrecta · ③ cifrar da exactamente el texto fijo · ④ cifra y descifra con datos al azar.<br>Generador: ① el navegador da números aleatorios seguros · ② respeta largo y caracteres permitidos · ③ incluye al menos uno de cada tipo · ④ 200 contraseñas distintas que usan todos los caracteres. Pasá el mouse por un punto para ver el detalle.</div>
+    <details id="selfTestHelp" style="margin-top:10px">
+      <summary>¿Qué hago si algún punto sale en rojo?</summary>
+      <div class="small" style="margin-top:6px">
+        <p style="margin:4px 0"><b>Tus textos ya cifrados no se dañaron.</b> El texto cifrado es solo un dato guardado en tu anotador; un punto rojo indica que <i>este navegador</i> (o esta versión) ya no calcula esa combinación como se espera. No borres ni sobrescribas nada.</p>
+        <p style="margin:4px 0"><b>Qué hacer:</b></p>
+        <ol style="margin:4px 0 4px 18px;padding:0">
+          <li>No cifres nada nuevo con la combinación en rojo en este navegador.</li>
+          <li>Abrí la página en otro navegador (Chrome, Firefox, Edge, Safari) o en otro dispositivo y corré la autoprueba. Si ahí sale todo verde, usalo para descifrar.</li>
+          <li>Apenas tengas un navegador en verde, descifrá los textos de esa combinación y volvé a cifrarlos con una combinación que salga verde en todos lados (por ejemplo AES-256-GCM).</li>
+        </ol>
+        <p style="margin:4px 0"><b>Qué implica cada punto rojo para lo que ya tenías cifrado con esa combinación:</b></p>
+        <ul style="margin:4px 0 4px 18px;padding:0">
+          <li><b>①</b> (no descifra el texto fijo): en este navegador probablemente no puedas descifrar esos textos. Hacelo desde un navegador donde ① salga verde.</li>
+          <li><b>②</b> (acepta una clave incorrecta): no confíes en ningún resultado de este navegador para esa combinación, aunque parezca correcto.</li>
+          <li><b>③ o ④</b> con ① en verde: tus textos existentes se descifran bien, pero lo que cifres acá podría no poder descifrarse en otro navegador o más adelante. Si cifraste algo nuevo en este navegador, verificá que se descifre en otro.</li>
+          <li><b>Generador en rojo</b>: no generes contraseñas en este navegador; las que ya generaste y guardaste siguen sirviendo. Generalas en otro navegador donde salga verde. No afecta al cifrado.</li>
+          <li><b>Todos en rojo</b>: el navegador no ofrece Web Crypto o está muy desactualizado. Actualizalo o usá otro.</li>
+        </ul>
+        <p style="margin:4px 0">Guardá siempre una copia de este <code>index.html</code> junto a tu anotador: abierta como archivo local funciona igual y no depende del hosting.</p>
+      </div>
+    </details>
+    </details>
+  </div>
+
+
+  <div class="panel">
+    <div class="tabs" role="tablist">
+      <button type="button" id="tabEnc" role="tab" aria-selected="true">Cifrar</button>
+      <button type="button" id="tabDec" role="tab" aria-selected="false">Descifrar</button>
+      <button type="button" id="tabGen" role="tab" aria-selected="false">Generar contraseña</button>
+    </div>
+
+    <div id="cryptoView">
+
+    <div class="row">
+      <div>
+        <label for="pw">Clave maestra</label>
+        <div class="pw">
+          <input type="password" id="pw" autocomplete="off" spellcheck="false">
+          <button type="button" data-toggle="pw">Mostrar</button>
+        </div>
+        <div class="meter"><i id="meterBar"></i></div>
+        <div class="hint" id="meterText"></div>
+      </div>
+      <div id="confirmBox">
+        <label for="pw2">Repetir clave (evita errores de tipeo)</label>
+        <div class="pw">
+          <input type="password" id="pw2" autocomplete="off" spellcheck="false">
+          <button type="button" data-toggle="pw2">Mostrar</button>
+        </div>
+        <div class="hint" id="matchText"></div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:8px">
+      <div>
+        <label for="alg">Algoritmo</label>
+        <select id="alg">
+          <option value="1" selected>AES-256-GCM</option>
+          <option value="2">AES-256-CBC + HMAC-SHA256</option>
+          <option value="3">AES-256-CTR + HMAC-SHA256</option>
+        </select>
+      </div>
+      <div>
+        <label for="kdf">Derivación de clave</label>
+        <select id="kdf">
+          <option value="1" selected>PBKDF2-SHA256</option>
+          <option value="2">PBKDF2-SHA512</option>
+        </select>
+      </div>
+      <div>
+        <label for="iter">Iteraciones</label>
+        <input type="number" id="iter" min="100000" max="10000000" step="1" value="400000" inputmode="numeric">
+      </div>
+    </div>
+    <p class="small" id="decNote" style="display:none;margin:8px 0 0">El texto cifrado no indica qué algoritmo, derivación ni iteraciones se usaron: tenés que elegir exactamente los mismos que al cifrar.</p>
+
+    <div style="margin-top:12px">
+      <label for="input" id="inputLabel">Texto a cifrar</label>
+      <textarea id="input" spellcheck="false" placeholder="Escribí o pegá el texto…"></textarea>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="btn primary" id="run">Cifrar</button>
+      <button type="button" class="btn" id="swap" title="Pasa el resultado a la entrada y cambia de modo">Usar resultado como entrada</button>
+      <button type="button" class="btn" id="clear">Borrar todo</button>
+    </div>
+    <div class="msg" id="msg" role="status"></div>
+    </div>
+
+    <div id="genView" hidden>
+    <div class="row" style="align-items:flex-end">
+      <div style="flex:0 1 140px">
+        <label for="genLen">Longitud (8 a 128)</label>
+        <input type="number" id="genLen" min="8" max="128" step="1" value="20" inputmode="numeric">
+      </div>
+      <div style="flex:3 1 380px" class="gen-opts">
+        <label><input type="checkbox" id="genLower" checked> Minúsculas (a-z)</label>
+        <label><input type="checkbox" id="genUpper" checked> Mayúsculas (A-Z)</label>
+        <label><input type="checkbox" id="genDigits" checked> Números (0-9)</label>
+        <label><input type="checkbox" id="genSymbols" checked> Símbolos</label>
+      </div>
+    </div>
+    <div style="margin-top:8px">
+      <label for="genSymbolSet">Símbolos permitidos (editalos si el sitio no acepta alguno)</label>
+      <input type="text" id="genSymbolSet" spellcheck="false" autocomplete="off" value="!@#$%^&amp;*()-_=+[]{};:,.?/~">
+    </div>
+    <div style="margin-top:12px">
+      <label for="genOut">Contraseña generada</label>
+      <div class="pw">
+        <input type="password" id="genOut" readonly spellcheck="false" autocomplete="off" placeholder="Tocá Generar y copiar" style="font-family:ui-monospace,Consolas,monospace;font-size:16px">
+        <button type="button" data-toggle="genOut">Mostrar</button>
+      </div>
+      <div class="hint" id="genInfo">Cada vez que generás sale una contraseña nueva e irrepetible: guardala antes de generar otra.</div>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn primary" id="genRun">Generar y copiar</button>
+      <button type="button" class="btn" id="genUse" title="Pasa a Cifrar y agrega la contraseña al final del texto">Agregar al texto a cifrar</button>
+    </div>
+    <div class="msg" id="genMsg" role="status"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="resultPanel">
+    <label for="output">Resultado</label>
+    <textarea id="output" readonly spellcheck="false"></textarea>
+    <div class="actions">
+      <button type="button" class="btn" id="copy">Copiar</button>
+      <button type="button" class="btn hidden" id="reveal">Mostrar texto</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <details>
+      <summary>Cómo funciona y formato del texto cifrado</summary>
+      <p class="small">La clave maestra se convierte en una clave de 256 bits con PBKDF2 y una sal aleatoria de 16 bytes. Cada cifrado usa un IV/nonce aleatorio nuevo, así que cifrar dos veces el mismo texto da resultados distintos. Los tres modos están autenticados: si alguien altera un solo carácter del texto cifrado, o la clave es incorrecta, el descifrado falla en vez de devolver basura.</p>
+      <p class="small">Formato: Base64URL de [sal (16 bytes), IV (16 bytes), datos cifrados]. No hay cabecera ni marcas: los tres algoritmos producen salidas del mismo largo y que parecen bytes aleatorios, así que no se puede saber cuál se usó. El texto se rellena a bloques de 32 bytes para no revelar su largo exacto. Las iteraciones de PBKDF2 se eligen entre 100.000 y 10.000.000 y tampoco quedan guardadas. Usa solo la Web Crypto API del navegador, sin librerías externas.</p>
+    </details>
+  </div>
+</main>
+
+<script>
+"use strict";
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const te = new TextEncoder();
+  const td = new TextDecoder("utf-8", { fatal: true });
+
+  // Formato (sin cabecera ni marcas): sal(16) | iv(16) | cuerpo.
+  // El cuerpo mide siempre L + 48 bytes (L = texto rellenado a múltiplos de 32),
+  // sea cual sea el algoritmo, así que las salidas son indistinguibles.
+  const MIN_ITER = 100000, MAX_ITER = 10000000;
+  const SALT_LEN = 16, IV_LEN = 16, MAC_LEN = 32, BLOCK = 32, OVERHEAD = 48;
+  const ALGS = {
+    1: { name: "AES-256-GCM", extra: 32 },               // L+32 de texto -> +16 de tag = L+48
+    2: { name: "AES-256-CBC + HMAC-SHA256", extra: 0 },  // L -> +16 de padding PKCS#7 + 32 HMAC = L+48
+    3: { name: "AES-256-CTR + HMAC-SHA256", extra: 16 }, // L+16 -> +32 HMAC = L+48
+  };
+  const KDFS = { 1: "SHA-256", 2: "SHA-512" };
+
+  class UserError extends Error {}
+
+  // ---------- utilidades ----------
+  function b64urlEncode(bytes) {
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function b64urlDecode(str) {
+    const clean = str.replace(/\s+/g, "");
+    if (!/^[A-Za-z0-9_-]*$/.test(clean)) throw new UserError("El texto cifrado contiene caracteres inválidos. ¿Lo copiaste completo y sin modificar?");
+    if (clean.length % 4 === 1) throw new UserError("El texto cifrado está incompleto (longitud inválida). Revisá que lo hayas copiado entero.");
+    const b64 = clean.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((clean.length + 3) % 4);
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function concat(...arrs) {
+    const out = new Uint8Array(arrs.reduce((n, a) => n + a.length, 0));
+    let o = 0; for (const a of arrs) { out.set(a, o); o += a.length; }
+    return out;
+  }
+  const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
+
+  // Relleno: [largo (4 bytes)] [texto] [ceros] hasta el tamaño pedido.
+  function pad(data, size) {
+    const out = new Uint8Array(size);
+    new DataView(out.buffer).setUint32(0, data.length, false);
+    out.set(data, 4);
+    return out;
+  }
+  function unpad(buf) {
+    if (buf.length < 4) return null;
+    const n = new DataView(buf.buffer, buf.byteOffset).getUint32(0, false);
+    if (n > buf.length - 4) return null;
+    for (let i = 4 + n; i < buf.length; i++) if (buf[i] !== 0) return null;
+    return buf.subarray(4, 4 + n);
+  }
+
+  // ---------- claves ----------
+  // Una sola derivación de 512 bits: 256 para cifrar y 256 para HMAC.
+  async function deriveRaw(password, salt, kdfId, iter) {
+    const base = await crypto.subtle.importKey("raw", te.encode(password), "PBKDF2", false, ["deriveBits"]);
+    return new Uint8Array(await crypto.subtle.deriveBits(
+      { name: "PBKDF2", hash: KDFS[kdfId], salt, iterations: iter }, base, 512));
+  }
+  async function keysFor(raw, algId) {
+    const cipherName = algId === 1 ? "AES-GCM" : algId === 2 ? "AES-CBC" : "AES-CTR";
+    const encKey = await crypto.subtle.importKey("raw", raw.subarray(0, 32), cipherName, false, ["encrypt", "decrypt"]);
+    const macKey = algId === 1 ? null :
+      await crypto.subtle.importKey("raw", raw.subarray(32, 64), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+    return { encKey, macKey };
+  }
+  // El número de algoritmo entra en la autenticación pero NO se guarda en la salida.
+  const authData = (algId, salt, iv) => concat(new Uint8Array([algId]), salt, iv);
+  function cipherParams(algId, iv, aad) {
+    if (algId === 1) return { name: "AES-GCM", iv: iv.subarray(0, 12), additionalData: aad, tagLength: 128 };
+    if (algId === 2) return { name: "AES-CBC", iv };
+    return { name: "AES-CTR", counter: iv, length: 64 };
+  }
+
+  // ---------- cifrar / descifrar ----------
+  // "fixed" (sal e IV fijos) solo lo usa la autoprueba; en uso normal siempre son aleatorios.
+  async function encrypt(plaintext, password, algId, kdfId, iter, fixed) {
+    const data = te.encode(plaintext);
+    const L = Math.max(BLOCK, Math.ceil((data.length + 4) / BLOCK) * BLOCK);
+    const salt = fixed ? fixed.salt : rand(SALT_LEN), iv = fixed ? fixed.iv : rand(IV_LEN);
+    const raw = await deriveRaw(password, salt, kdfId, iter);
+    const { encKey, macKey } = await keysFor(raw, algId);
+    raw.fill(0);
+    const aad = authData(algId, salt, iv);
+    let body = new Uint8Array(await crypto.subtle.encrypt(cipherParams(algId, iv, aad), encKey, pad(data, L + ALGS[algId].extra)));
+    if (macKey) body = concat(body, new Uint8Array(await crypto.subtle.sign("HMAC", macKey, concat(aad, body))));
+    if (body.length !== L + OVERHEAD) throw new Error("Largo de salida inesperado.");
+    return b64urlEncode(concat(salt, iv, body));
+  }
+
+  async function tryAlg(raw, algId, salt, iv, body) {
+    const { encKey, macKey } = await keysFor(raw, algId);
+    const aad = authData(algId, salt, iv);
+    let ct = body;
+    if (macKey) {
+      ct = body.subarray(0, body.length - MAC_LEN);
+      const ok = await crypto.subtle.verify("HMAC", macKey, body.subarray(body.length - MAC_LEN), concat(aad, ct));
+      if (!ok) return null;
+    }
+    let pt;
+    try { pt = new Uint8Array(await crypto.subtle.decrypt(cipherParams(algId, iv, aad), encKey, ct)); }
+    catch { return null; }
+    return unpad(pt);
+  }
+
+  async function decrypt(token, password, algId, kdfId, iter) {
+    const s = token.trim();
+    if (!s) throw new UserError("Pegá el texto cifrado en la entrada.");
+    const blob = b64urlDecode(s);
+    const bodyLen = blob.length - SALT_LEN - IV_LEN;
+    if (bodyLen < BLOCK + OVERHEAD || (bodyLen - OVERHEAD) % BLOCK !== 0)
+      throw new UserError("Esto no parece un texto cifrado por esta herramienta, o está incompleto.");
+    const salt = blob.subarray(0, SALT_LEN);
+    const iv = blob.subarray(SALT_LEN, SALT_LEN + IV_LEN);
+    const body = blob.subarray(SALT_LEN + IV_LEN);
+    const raw = await deriveRaw(password, salt, kdfId, iter);
+    let data;
+    try { data = await tryAlg(raw, algId, salt, iv, body); } finally { raw.fill(0); }
+    if (!data) throw new UserError("No se pudo descifrar. Revisá la clave, el algoritmo, la derivación y las iteraciones: tienen que ser exactamente los mismos que al cifrar. También puede ser que el texto se haya modificado.");
+    try { return td.decode(data); }
+    catch { throw new UserError("El contenido descifrado no es texto UTF-8 válido."); }
+  }
+
+  // ---------- fortaleza de la clave (estimación simple) ----------
+  function strength(pw) {
+    if (!pw) return { bits: 0, label: "" };
+    let pool = 0;
+    if (/[a-z]/.test(pw)) pool += 26;
+    if (/[A-Z]/.test(pw)) pool += 26;
+    if (/[0-9]/.test(pw)) pool += 10;
+    if (/[^A-Za-z0-9]/.test(pw)) pool += 33;
+    let bits = pw.length * Math.log2(Math.max(pool, 2));
+    if (/^(.)\1+$/.test(pw)) bits = 4;
+    if (/(1234|abcd|qwer|asdf|password|contrase|admin|0000)/i.test(pw)) bits = Math.min(bits, 28);
+    let label;
+    if (bits < 40) label = "Muy débil: se puede adivinar con fuerza bruta.";
+    else if (bits < 60) label = "Débil: insuficiente para proteger contraseñas.";
+    else if (bits < 80) label = "Aceptable. Mejor si es más larga.";
+    else label = "Fuerte.";
+    return { bits, label };
+  }
+
+  // ---------- interfaz ----------
+  let mode = "enc";
+  let revealTimer = null;
+  const ui = {
+    pw: $("pw"), pw2: $("pw2"), input: $("input"), output: $("output"), msg: $("msg"),
+    run: $("run"), alg: $("alg"), kdf: $("kdf"), iter: $("iter"),
+  };
+
+  function showMsg(kind, text) {
+    ui.msg.className = "msg show " + kind;
+    ui.msg.textContent = text;
+  }
+  function hideMsg() { ui.msg.className = "msg"; ui.msg.textContent = ""; }
+
+  function setOutputSecret(isSecret) {
+    // Al descifrar, el resultado se muestra oculto hasta que se pida verlo.
+    $("reveal").classList.toggle("hidden", !isSecret);
+    ui.output.style.webkitTextSecurity = isSecret ? "disc" : "";
+    ui.output.dataset.secret = isSecret ? "1" : "";
+    $("reveal").textContent = "Mostrar texto";
+  }
+
+  function setMode(m) {
+    mode = m;
+    const enc = m === "enc", gen = m === "gen";
+    $("tabEnc").setAttribute("aria-selected", enc);
+    $("tabDec").setAttribute("aria-selected", m === "dec");
+    $("tabGen").setAttribute("aria-selected", gen);
+    $("cryptoView").hidden = gen;
+    $("resultPanel").hidden = gen;
+    $("genView").hidden = !gen;
+    if (gen) { hideMsg(); return; }
+    $("confirmBox").style.display = enc ? "" : "none";
+    $("decNote").style.display = enc ? "none" : "";
+    $("inputLabel").textContent = enc ? "Texto a cifrar" : "Texto cifrado";
+    ui.input.placeholder = enc ? "Escribí o pegá el texto…" : "Pegá el texto cifrado…";
+    ui.run.textContent = enc ? "Cifrar" : "Descifrar";
+    hideMsg();
+    updateMatch();
+  }
+
+  function updateMeter() {
+    const { bits, label } = strength(ui.pw.value);
+    const pct = Math.min(100, bits / 100 * 100);
+    const bar = $("meterBar");
+    bar.style.width = pct + "%";
+    bar.style.background = bits < 40 ? "var(--err)" : bits < 60 ? "var(--warn)" : "var(--ok)";
+    $("meterText").textContent = ui.pw.value ? label + " (~" + Math.round(bits) + " bits)" : "Usá una frase larga: 4–6 palabras al azar o 16+ caracteres.";
+  }
+  function updateMatch() {
+    const t = $("matchText");
+    if (mode !== "enc" || !ui.pw2.value) { t.textContent = ""; return; }
+    t.textContent = ui.pw.value === ui.pw2.value ? "Coinciden." : "No coinciden.";
+    t.style.color = ui.pw.value === ui.pw2.value ? "var(--ok)" : "var(--err)";
+  }
+
+  async function run() {
+    hideMsg();
+    const pw = ui.pw.value;
+    const input = ui.input.value;
+    try {
+      if (!window.crypto || !crypto.subtle) throw new UserError("Este navegador no ofrece Web Crypto. Abrí la página por https:// o como archivo local en un navegador moderno.");
+      if (!pw) throw new UserError("Ingresá la clave maestra.");
+      const algId = Number(ui.alg.value), kdfId = Number(ui.kdf.value);
+      const iterStr = ui.iter.value.trim();
+      const iter = Number(iterStr);
+      if (!/^\d+$/.test(iterStr) || iter < MIN_ITER || iter > MAX_ITER)
+        throw new UserError("Las iteraciones deben ser un número entero entre 100.000 y 10.000.000 (sin puntos ni comas).");
+      if (mode === "enc") {
+        if (pw !== ui.pw2.value) throw new UserError("Las claves no coinciden. Si cifrás con una clave mal tipeada, no vas a poder descifrar después.");
+        if (!input) throw new UserError("Escribí el texto a cifrar.");
+        ui.run.disabled = true; ui.run.textContent = "Cifrando…";
+        const out = await encrypt(input, pw, algId, kdfId, iter);
+        // Verificación: se descifra de nuevo para confirmar que el resultado es recuperable.
+        const check = await decrypt(out, pw, algId, kdfId, iter);
+        if (check !== input) throw new Error("La verificación posterior al cifrado falló.");
+        setOutputSecret(false);
+        ui.output.value = out;
+        const s = strength(pw);
+        if (s.bits < 60) showMsg("warn", "Cifrado y verificado, pero la clave es débil: alguien con el texto cifrado podría adivinarla.");
+        else showMsg("ok", "Cifrado y verificado con " + ALGS[algId].name + ", PBKDF2-" + KDFS[kdfId] + " y " + iter.toLocaleString("es") + " iteraciones. El texto no guarda estos datos: para descifrarlo vas a necesitar los mismos.");
+      } else {
+        ui.run.disabled = true; ui.run.textContent = "Descifrando…";
+        const text = await decrypt(input, pw, algId, kdfId, iter);
+        ui.output.value = text;
+        setOutputSecret(true);
+        showMsg("ok", "Descifrado correctamente.");
+      }
+    } catch (e) {
+      ui.output.value = "";
+      setOutputSecret(false);
+      if (e instanceof UserError) showMsg("err", e.message);
+      else { showMsg("err", "Error inesperado: " + (e && e.message ? e.message : e)); console.error(e); }
+    } finally {
+      ui.run.disabled = false; ui.run.textContent = mode === "enc" ? "Cifrar" : "Descifrar";
+    }
+  }
+
+  $("tabEnc").onclick = () => setMode("enc");
+  $("tabDec").onclick = () => setMode("dec");
+  $("tabGen").onclick = () => setMode("gen");
+  ui.run.onclick = run;
+  ui.pw.addEventListener("input", () => { updateMeter(); updateMatch(); });
+  ui.pw2.addEventListener("input", updateMatch);
+  [ui.pw, ui.pw2].forEach((el) => el.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); }));
+  ui.input.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) run(); });
+  document.querySelectorAll("[data-toggle]").forEach((b) => b.onclick = () => {
+    const el = $(b.dataset.toggle);
+    const show = el.type === "password";
+    el.type = show ? "text" : "password";
+    b.textContent = show ? "Ocultar" : "Mostrar";
+  });
+  $("reveal").onclick = () => {
+    const hidden = ui.output.dataset.secret === "1";
+    ui.output.style.webkitTextSecurity = hidden ? "" : "disc";
+    ui.output.dataset.secret = hidden ? "" : "1";
+    $("reveal").textContent = hidden ? "Ocultar texto" : "Mostrar texto";
+  };
+  $("copy").onclick = async () => {
+    if (!ui.output.value) { showMsg("err", "No hay resultado para copiar."); return; }
+    try {
+      await navigator.clipboard.writeText(ui.output.value);
+      showMsg("ok", "Copiado al portapapeles." + (mode === "dec" ? " Recordá que queda en el portapapeles hasta que copies otra cosa." : ""));
+    } catch {
+      ui.output.focus(); ui.output.select();
+      showMsg("warn", "El navegador no permitió copiar automáticamente. El texto quedó seleccionado: usá Ctrl+C.");
+    }
+  };
+  $("swap").onclick = () => {
+    if (!ui.output.value) { showMsg("err", "No hay resultado para usar."); return; }
+    ui.input.value = ui.output.value;
+    ui.output.value = "";
+    setOutputSecret(false);
+    setMode(mode === "enc" ? "dec" : "enc");
+  };
+  $("clear").onclick = () => {
+    ui.pw.value = ui.pw2.value = ui.input.value = ui.output.value = "";
+    $("genOut").value = ""; $("genOut").type = "password"; document.querySelector('[data-toggle="genOut"]').textContent = "Mostrar"; hideGenMsg();
+    setOutputSecret(false); hideMsg(); updateMeter(); updateMatch();
+  };
+  // ---------- generador de contraseñas ----------
+  // Usa crypto.getRandomValues (aleatorio criptográfico). Cada contraseña es nueva e irrepetible:
+  // no depende de ningún dato, así que no se puede volver a generar la misma.
+  const GEN_SETS = {
+    genLower: "abcdefghijklmnopqrstuvwxyz",
+    genUpper: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    genDigits: "0123456789",
+  };
+  // Índice aleatorio sin sesgo en [0, n): descarta valores que harían el reparto desparejo.
+  function randIndex(n) {
+    const limit = Math.floor(0x100000000 / n) * n;
+    const buf = new Uint32Array(1);
+    do { crypto.getRandomValues(buf); } while (buf[0] >= limit);
+    return buf[0] % n;
+  }
+  function generatePassword(length, sets) {
+    const all = sets.join("");
+    for (;;) {
+      let pw = "";
+      for (let i = 0; i < length; i++) pw += all[randIndex(all.length)];
+      // Se exige al menos un carácter de cada tipo elegido; si falta alguno se vuelve a sortear entera
+      // (así el resultado sigue siendo uniforme entre todas las contraseñas válidas).
+      if (sets.every((set) => [...pw].some((c) => set.includes(c)))) return pw;
+    }
+  }
+  function showGenMsg(kind, text) { const m = $("genMsg"); m.className = "msg show " + kind; m.textContent = text; }
+  function hideGenMsg() { const m = $("genMsg"); m.className = "msg"; m.textContent = ""; }
+  function genOptions() {
+    const lenStr = $("genLen").value.trim(), length = Number(lenStr);
+    if (!/^\d+$/.test(lenStr) || length < 8 || length > 128) throw new UserError("La longitud debe ser un número entero entre 8 y 128.");
+    const sets = Object.keys(GEN_SETS).filter((id) => $(id).checked).map((id) => GEN_SETS[id]);
+    if ($("genSymbols").checked) {
+      const sym = cleanSymbols($("genSymbolSet").value);
+      if (!sym) throw new UserError("Elegiste símbolos pero la lista de símbolos permitidos está vacía.");
+      sets.push(sym);
+    }
+    if (!sets.length) throw new UserError("Elegí al menos un tipo de carácter.");
+    if (length < sets.length) throw new UserError("La longitud tiene que ser al menos igual a la cantidad de tipos elegidos.");
+    return { length, sets };
+  }
+  const cleanSymbols = (str) => [...new Set([...str].filter((c) => c.trim() && !/[A-Za-z0-9]/.test(c)))].join("");
+  $("genRun").onclick = async () => {
+    hideGenMsg();
+    let opts;
+    try { opts = genOptions(); } catch (e) { showGenMsg("err", e.message); return; }
+    const pw = generatePassword(opts.length, opts.sets);
+    const out = $("genOut");
+    out.value = pw;
+    const pool = new Set(opts.sets.join("")).size;
+    const bits = Math.round(opts.length * Math.log2(pool));
+    $("genInfo").textContent = "~" + bits + " bits de entropía (" + pool + " caracteres posibles). Cada vez que generás sale una nueva e irrepetible: guardala antes de generar otra.";
+    try {
+      await navigator.clipboard.writeText(pw);
+      showGenMsg("ok", "Contraseña nueva generada y copiada al portapapeles.");
+    } catch {
+      // Sin permiso de portapapeles: se muestra para poder copiarla a mano.
+      out.type = "text";
+      document.querySelector('[data-toggle="genOut"]').textContent = "Ocultar";
+      out.focus(); out.select();
+      showGenMsg("warn", "Generada, pero el navegador no permitió copiarla automáticamente. Quedó seleccionada: usá Ctrl+C.");
+    }
+  };
+  $("genUse").onclick = () => {
+    const v = $("genOut").value;
+    if (!v) { showGenMsg("err", "Primero generá una contraseña."); return; }
+    if (mode !== "enc") setMode("enc");
+    const cur = ui.input.value;
+    // Si la línea actual termina en ":" (ej. "gmail:") se agrega en la misma línea; si no, en una nueva.
+    const sep = !cur || /[\n ]$/.test(cur) ? "" : cur.endsWith(":") ? " " : "\n";
+    ui.input.value = cur + sep + v;
+    ui.input.focus();
+    ui.input.setSelectionRange(ui.input.value.length, ui.input.value.length);
+    showGenMsg("ok", "Agregada al final del texto a cifrar. Escribí al lado para qué sitio es.");
+  };
+
+  // Limpia todo al cerrar o al quedar la pestaña oculta por mucho tiempo.
+  window.addEventListener("pagehide", () => $("clear").click());
+  let hiddenAt = 0;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) hiddenAt = Date.now();
+    else if (hiddenAt && Date.now() - hiddenAt > 5 * 60 * 1000) { $("clear").click(); showMsg("warn", "Se borró todo por inactividad (pestaña oculta más de 5 minutos)."); }
+  });
+
+  // ---------- autoprueba ----------
+  // Vectores fijos generados con una implementación independiente del mismo formato.
+  // Si el navegador cambiara el resultado de algún algoritmo, esto lo detecta.
+  const TEST_PW = "clave-de-prueba", TEST_ITER = 1000;
+  const TEST_TEXT = "Autoprueba Cypher ✓ ñ 🔑 0123456789";
+  const TEST_SALT = Uint8Array.from({ length: 16 }, (_, i) => i + 1);      // 01 02 … 10
+  const TEST_IV = Uint8Array.from({ length: 16 }, (_, i) => 0xA0 + i);     // A0 A1 … AF
+  const TEST_VECTORS = [
+      [1, 1, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq8rCvrERx0_KIUDvhqAYZ7tQ1FvbvkLe7gWpwPoT5O6e5DZ0XEMxNXTZNxYnBoufYCJGeqrJab841A_MpffLdFMWrFZIP6Z1uQgzkq_lQb1UbcQZO_vzuU2XYmqzf5W2Cl8xOhLL8FiUQuoLsmP6NtO"],
+      [2, 1, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq8IdniDESCRk7aoWI2_joDR1wjXG9tWUlSdh3M18_SVkYtNvFG-Vonr6P0WBvjge53jL3iUtg59VXJLE1Hv6sxWeXkfZgYoHQhWDLiEoeaZEoP0D7exeBHmVh-vND8OhmcgYLfd4-wnUYSW1K9AnJIt"],
+      [3, 1, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq_X1nuAIsskAZSEaTpPDPrFNDga8U-BQFkBc-cPrxf7RjxY27c6PfhwUJTf31N7ZhVHAHxDFnGjXjdj4syXDvQBWz8ZBY1DanFSt20fkWYjqaQPNt2uKEQAoLc5GE-DrLcTIbBwa51S_5VGNkffpbEW"],
+      [1, 2, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq-AiNxKXKz4V84wfu-LukDkajYYfkJClLaEgryGLO3mYT406GK4ny7KGRvGjiTM9iP32qqRHKiS7REWXpGBo0wrKSIcDzSrbMqzkN7ZTEamldo-8KwKL5ZdjulLMKfZQFQeOXgpjxLxt3_-sqYGt_Mq"],
+      [2, 2, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq-1xQ5P-aBKmu792pe81zsoWq1bEBRIiz9pxp6uWvfnCOdK0ZuHj62VOM4gTMMMMXPZaYc6vuoat-_AVDEoaTw0AtYb4UuQLk78-uEBDVa_dYz9movSpWrH05ChSlEF-Z4mpo4_lSq_rORcBoHmgA4p"],
+      [3, 2, "AQIDBAUGBwgJCgsMDQ4PEKChoqOkpaanqKmqq6ytrq_ldKOE819-6amPhNKf2Y0YXedBOBEspx1sRGhhCnQ1TuqWbGgM3je3oD7awjuSiD8paEXPNbJM4dDCS-8xaOMfPcaIs9CYY1IQ_voqNn-y0bSW7HvtNSdhNArJB-OhijObYM-BfcyttiexYnNyg4u9"],
+  ];
+  const CHECKS = ["Descifra el texto fijo", "Rechaza una clave incorrecta", "Cifrar da exactamente el texto fijo", "Cifra y descifra con datos al azar"];
+  const GEN_CHECKS = ["El navegador da números aleatorios seguros", "Respeta largo y caracteres permitidos", "Incluye al menos uno de cada tipo elegido", "200 contraseñas distintas que usan todos los caracteres"];
+  const GEN_TEST_SYMBOLS = "!@#$%^&*()-_=+[]{};:,.?/~";
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // Cada fila: una etiqueta y cuatro chequeos (nombre + función que lanza error si falla).
+  function selfTestRows() {
+    const fixed = { salt: TEST_SALT, iv: TEST_IV };
+    const rows = TEST_VECTORS.map(([algId, kdfId, vec]) => ({
+      label: ALGS[algId].name + " · PBKDF2-" + KDFS[kdfId],
+      checks: [
+        async () => { if (await decrypt(vec, TEST_PW, algId, kdfId, TEST_ITER) !== TEST_TEXT) throw new Error("resultado distinto"); },
+        async () => {
+          let rejected = false;
+          try { await decrypt(vec, TEST_PW + "x", algId, kdfId, TEST_ITER); } catch { rejected = true; }
+          if (!rejected) throw new Error("aceptó una clave incorrecta");
+        },
+        async () => { if (await encrypt(TEST_TEXT, TEST_PW, algId, kdfId, TEST_ITER, fixed) !== vec) throw new Error("el cifrado no coincide con el texto cifrado esperado"); },
+        async () => {
+          const ct = await encrypt(TEST_TEXT, TEST_PW, algId, kdfId, TEST_ITER);
+          if (ct.length !== vec.length) throw new Error("largo de salida distinto");
+          if (await decrypt(ct, TEST_PW, algId, kdfId, TEST_ITER) !== TEST_TEXT) throw new Error("ida y vuelta falló");
+        },
+      ].map((fn, i) => ({ name: CHECKS[i], fn })),
+    }));
+    const all4 = [GEN_SETS.genLower, GEN_SETS.genUpper, GEN_SETS.genDigits, GEN_TEST_SYMBOLS];
+    rows.push({
+      label: "Generador de contraseñas",
+      checks: [
+        async () => {
+          if (!window.crypto || !crypto.getRandomValues) throw new Error("no hay crypto.getRandomValues");
+          const a = crypto.getRandomValues(new Uint8Array(32)), b = crypto.getRandomValues(new Uint8Array(32));
+          if (a.every((x) => x === 0) || a.every((x, i) => x === b[i])) throw new Error("los valores aleatorios no varían");
+        },
+        async () => {
+          const combos = [all4, [GEN_SETS.genLower], [GEN_SETS.genDigits, "-_"], [GEN_SETS.genUpper, GEN_SETS.genLower]];
+          for (const sets of combos) for (const len of [8, 20, 64, 128]) {
+            const pool = sets.join(""), pw = generatePassword(len, sets);
+            if (pw.length !== len) throw new Error("largo " + pw.length + " en vez de " + len);
+            if (![...pw].every((c) => pool.includes(c))) throw new Error("usó un carácter no permitido");
+          }
+        },
+        async () => {
+          for (let i = 0; i < 50; i++) {
+            const pw = generatePassword(8, all4);
+            if (!all4.every((set) => [...pw].some((c) => set.includes(c)))) throw new Error("faltó algún tipo de carácter");
+          }
+        },
+        async () => {
+          const seen = new Set(), used = new Set();
+          for (let i = 0; i < 200; i++) { const pw = generatePassword(20, all4); seen.add(pw); for (const c of pw) used.add(c); }
+          if (seen.size !== 200) throw new Error("se repitieron contraseñas");
+          // 4000 caracteres sorteados entre 87 posibles: que falte alguno es prácticamente imposible si el sorteo es parejo.
+          if (used.size !== new Set(all4.join("")).size) throw new Error("hay caracteres que nunca salieron");
+        },
+      ].map((fn, i) => ({ name: GEN_CHECKS[i], fn })),
+    });
+    return rows;
+  }
+
+  function buildGrid(rows) {
+    const g = $("selfTestGrid");
+    g.textContent = "";
+    const add = (cls, text, title) => { const d = document.createElement("div"); d.className = cls; if (text) d.textContent = text; if (title) d.title = title; g.appendChild(d); return d; };
+    add("", "");
+    ["①", "②", "③", "④"].forEach((n) => add("h", n));
+    return rows.map((row) => {
+      add("lbl", row.label);
+      return row.checks.map((c) => add("dot", "", c.name + ": pendiente"));
+    });
+  }
+  async function selfTest() {
+    const btn = $("selfTestBtn"), status = $("selfTestStatus"), alert = $("selfTestAlert");
+    btn.disabled = true; status.textContent = "Autoprueba: ejecutando…"; status.style.color = "";
+    const rows = selfTestRows();
+    const dots = buildGrid(rows);
+    const fails = [];
+    let ms = 0, total = 0;
+    for (let r = 0; r < rows.length; r++) {
+      for (let i = 0; i < rows[r].checks.length; i++) {
+        const { name, fn } = rows[r].checks[i];
+        const dot = dots[r][i];
+        total++;
+        dot.className = "dot run";
+        const t0 = performance.now();
+        try {
+          await fn();
+          dot.className = "dot ok"; dot.title = name + ": OK";
+        } catch (e) {
+          const why = e && e.message ? e.message : String(e);
+          dot.className = "dot err"; dot.title = name + ": FALLÓ (" + why + ")";
+          fails.push(rows[r].label + ", " + name.toLowerCase() + " (" + why + ")");
+        }
+        ms += performance.now() - t0;
+        await sleep(40); // pausa breve solo para que se vea el avance
+      }
+    }
+    if (fails.length) {
+      status.textContent = "Autoprueba: FALLARON " + fails.length + " de " + total + " chequeos.";
+      status.style.color = "var(--err)";
+      alert.className = "msg show err";
+      $("selfTestHelp").open = true;
+      $("selfTestPanel").open = true;
+      alert.textContent = "La autoprueba falló: este navegador no produce los resultados esperados. Tus textos ya cifrados y tus contraseñas guardadas no se dañaron, pero no cifres ni generes nada nuevo con lo que salió en rojo. Abajo están los chequeos que fallaron (pasá el mouse por los puntos rojos para ver el detalle) y qué hacer.";
+      console.warn("Autoprueba:", fails);
+    } else {
+      status.textContent = "Autoprueba OK: " + total + " de " + total + " chequeos correctos (" + Math.round(ms) + " ms de cálculo).";
+      status.style.color = "var(--ok)";
+      alert.className = "msg"; alert.textContent = "";
+    }
+    btn.disabled = false;
+  }
+  $("selfTestBtn").onclick = (e) => { e.preventDefault(); selfTest(); };
+
+  setMode("enc");
+  updateMeter();
+  selfTest();
+})();
+</script>
+</body>
+</html>
