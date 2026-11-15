@@ -53,6 +53,8 @@
   summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   .small { font-size: 12px; color: var(--muted); }
   .hidden { display: none; }
+  .gen-opts { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-bottom: 8px; }
+  .gen-opts label { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; margin: 0; cursor: pointer; }
   .st-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; }
   .st-summary::-webkit-details-marker { display: none; }
   .st-summary::before { content: "▸"; color: var(--muted); transition: transform .15s; }
@@ -177,6 +179,36 @@
       <button type="button" class="btn" id="copy">Copiar</button>
       <button type="button" class="btn hidden" id="reveal">Mostrar texto</button>
     </div>
+  </div>
+
+  <div class="panel">
+    <label>Generador de contraseñas</label>
+    <div class="row" style="align-items:flex-end">
+      <div style="flex:0 1 140px">
+        <label for="genLen" style="font-weight:400">Longitud (8 a 128)</label>
+        <input type="number" id="genLen" min="8" max="128" step="1" value="20" inputmode="numeric">
+      </div>
+      <div style="flex:3 1 380px" class="gen-opts">
+        <label><input type="checkbox" id="genLower" checked> Minúsculas (a-z)</label>
+        <label><input type="checkbox" id="genUpper" checked> Mayúsculas (A-Z)</label>
+        <label><input type="checkbox" id="genDigits" checked> Números (0-9)</label>
+        <label><input type="checkbox" id="genSymbols" checked> Símbolos</label>
+      </div>
+    </div>
+    <div style="margin-top:8px">
+      <label for="genSymbolSet" style="font-weight:400">Símbolos permitidos (editalos si el sitio no acepta alguno)</label>
+      <input type="text" id="genSymbolSet" spellcheck="false" autocomplete="off" value="!@#$%^&amp;*()-_=+[]{};:,.?/~">
+    </div>
+    <div style="margin-top:12px">
+      <input type="text" id="genOut" readonly spellcheck="false" autocomplete="off" placeholder="Tocá Generar" style="font-family:ui-monospace,Consolas,monospace;font-size:16px">
+      <div class="hint" id="genInfo"></div>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn primary" id="genRun">Generar</button>
+      <button type="button" class="btn" id="genCopy">Copiar</button>
+      <button type="button" class="btn" id="genUse" title="Agrega la contraseña al final del texto a cifrar">Agregar al texto a cifrar</button>
+    </div>
+    <div class="msg" id="genMsg" role="status"></div>
   </div>
 
   <div class="panel">
@@ -468,8 +500,73 @@
   };
   $("clear").onclick = () => {
     ui.pw.value = ui.pw2.value = ui.input.value = ui.output.value = "";
+    $("genOut").value = ""; $("genInfo").textContent = ""; hideGenMsg();
     setOutputSecret(false); hideMsg(); updateMeter(); updateMatch();
   };
+  // ---------- generador de contraseñas ----------
+  // Usa crypto.getRandomValues (aleatorio criptográfico). Cada contraseña es nueva e irrepetible:
+  // no depende de ningún dato, así que no se puede volver a generar la misma.
+  const GEN_SETS = {
+    genLower: "abcdefghijklmnopqrstuvwxyz",
+    genUpper: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    genDigits: "0123456789",
+  };
+  // Índice aleatorio sin sesgo en [0, n): descarta valores que harían el reparto desparejo.
+  function randIndex(n) {
+    const limit = Math.floor(0x100000000 / n) * n;
+    const buf = new Uint32Array(1);
+    do { crypto.getRandomValues(buf); } while (buf[0] >= limit);
+    return buf[0] % n;
+  }
+  function generatePassword(length, sets) {
+    const all = sets.join("");
+    for (;;) {
+      let pw = "";
+      for (let i = 0; i < length; i++) pw += all[randIndex(all.length)];
+      // Se exige al menos un carácter de cada tipo elegido; si falta alguno se vuelve a sortear entera
+      // (así el resultado sigue siendo uniforme entre todas las contraseñas válidas).
+      if (sets.every((set) => [...pw].some((c) => set.includes(c)))) return pw;
+    }
+  }
+  function showGenMsg(kind, text) { const m = $("genMsg"); m.className = "msg show " + kind; m.textContent = text; }
+  function hideGenMsg() { const m = $("genMsg"); m.className = "msg"; m.textContent = ""; }
+  $("genRun").onclick = () => {
+    hideGenMsg();
+    const lenStr = $("genLen").value.trim(), length = Number(lenStr);
+    if (!/^\d+$/.test(lenStr) || length < 8 || length > 128) { showGenMsg("err", "La longitud debe ser un número entero entre 8 y 128."); return; }
+    const sets = Object.keys(GEN_SETS).filter((id) => $(id).checked).map((id) => GEN_SETS[id]);
+    if ($("genSymbols").checked) {
+      const sym = [...new Set([...$("genSymbolSet").value].filter((c) => c.trim() && !/[A-Za-z0-9]/.test(c)))].join("");
+      if (!sym) { showGenMsg("err", "Elegiste símbolos pero la lista de símbolos permitidos está vacía."); return; }
+      sets.push(sym);
+    }
+    if (!sets.length) { showGenMsg("err", "Elegí al menos un tipo de carácter."); return; }
+    if (length < sets.length) { showGenMsg("err", "La longitud tiene que ser al menos igual a la cantidad de tipos elegidos."); return; }
+    const pw = generatePassword(length, sets);
+    $("genOut").value = pw;
+    const pool = new Set(sets.join("")).size;
+    const bits = Math.round(length * Math.log2(pool));
+    $("genInfo").textContent = "~" + bits + " bits de entropía (" + pool + " caracteres posibles). Cada vez que toques Generar sale una distinta: si la vas a usar, guardala antes.";
+  };
+  $("genCopy").onclick = async () => {
+    const v = $("genOut").value;
+    if (!v) { showGenMsg("err", "Primero generá una contraseña."); return; }
+    try { await navigator.clipboard.writeText(v); showGenMsg("ok", "Copiada al portapapeles."); }
+    catch { $("genOut").focus(); $("genOut").select(); showGenMsg("warn", "El navegador no permitió copiar automáticamente. Quedó seleccionada: usá Ctrl+C."); }
+  };
+  $("genUse").onclick = () => {
+    const v = $("genOut").value;
+    if (!v) { showGenMsg("err", "Primero generá una contraseña."); return; }
+    if (mode !== "enc") setMode("enc");
+    const cur = ui.input.value;
+    // Si la línea actual termina en ":" (ej. "gmail:") se agrega en la misma línea; si no, en una nueva.
+    const sep = !cur || /[\n ]$/.test(cur) ? "" : cur.endsWith(":") ? " " : "\n";
+    ui.input.value = cur + sep + v;
+    ui.input.focus();
+    ui.input.setSelectionRange(ui.input.value.length, ui.input.value.length);
+    showGenMsg("ok", "Agregada al final del texto a cifrar. Escribí al lado para qué sitio es.");
+  };
+
   // Limpia todo al cerrar o al quedar la pestaña oculta por mucho tiempo.
   window.addEventListener("pagehide", () => $("clear").click());
   let hiddenAt = 0;
