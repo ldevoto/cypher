@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  const APP_VERSION = "1.1.0";
+  const APP_VERSION = "1.2.0";
   const CFG = window.CYPHER_CONFIG || {};
   const $ = (id) => document.getElementById(id);
   const te = new TextEncoder();
@@ -236,12 +236,12 @@
     }
   }
   const cleanSymbols = (str) => [...new Set([...str].filter((c) => c.trim() && !/[A-Za-z0-9]/.test(c)))].join("");
-  function genOptions() {
-    const lenStr = $("genLen").value.trim(), length = Number(lenStr);
+  function genOptions(px = "gen") {
+    const lenStr = $(px + "Len").value.trim(), length = Number(lenStr);
     if (!/^\d+$/.test(lenStr) || length < 8 || length > 128) throw new UserError("La longitud debe ser un número entero entre 8 y 128.");
-    const sets = Object.keys(GEN_SETS).filter((id) => $(id).checked).map((id) => GEN_SETS[id]);
-    if ($("genSymbols").checked) {
-      const sym = cleanSymbols($("genSymbolSet").value);
+    const sets = Object.keys(GEN_SETS).filter((id) => $(px + id.slice(3)).checked).map((id) => GEN_SETS[id]);
+    if ($(px + "Symbols").checked) {
+      const sym = cleanSymbols($(px + "SymbolSet").value);
       if (!sym) throw new UserError("Elegiste símbolos pero la lista de símbolos permitidos está vacía.");
       sets.push(sym);
     }
@@ -315,7 +315,7 @@
   const str = (v) => (typeof v === "string" ? v : "");
   function normEntry(e) {
     if (e.deleted) return { id: e.id, deleted: true, updatedAt: Number(e.updatedAt) || 0 };
-    return { id: e.id, title: str(e.title), url: str(e.url), username: str(e.username), password: str(e.password), notes: str(e.notes),
+    return { id: e.id, title: str(e.title), username: str(e.username), password: str(e.password), notes: str(e.notes),
       createdAt: Number(e.createdAt) || 0, updatedAt: Number(e.updatedAt) || 0 };
   }
   function mergeEntries(a, b) {
@@ -595,16 +595,17 @@
     const rows = vaultIndex || [];
     for (const v of rows) {
       const open = S && S.vaultId === v.vaultId;
-      list.append(el("li", null, el("div", { class: "v-row" + (open ? " current" : "") },
-        el("span", { class: "v-ico", text: open ? "🔓" : "🗄️" }),
-        el("span", { class: "grow", onclick: () => goVault(v.vaultId) },
+      list.append(el("li", null, el("div", { class: "v-row click" + (open ? " current" : ""), role: "button", tabindex: "0", title: "Abrir “" + v.name + "”",
+          onclick: () => goVault(v.vaultId), onkeydown: (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); goVault(v.vaultId); } } },
+        el("span", { class: "v-ico", text: open ? "🔓" : "🔒" }),
+        el("span", { class: "grow" },
           el("div", { class: "v-name", text: v.name }),
-          el("div", { class: "v-meta", text: (open ? "Abierta · " : "") + "Modificada: " + fmtDate(Date.parse(v.modifiedTime)) })),
-        el("button", { type: "button", class: "btn small", text: open ? "Ver" : "Abrir", onclick: () => goVault(v.vaultId) }),
-        el("button", { type: "button", class: "btn small danger", title: "Eliminar (solo si está vacía)", text: "🗑", onclick: () => deleteVault(v) }))));
+          el("div", { class: "v-meta", text: (open ? "Abierta ahora · " : "") + "Modificada el " + fmtDate(Date.parse(v.modifiedTime)) })),
+        el("button", { type: "button", class: "icon-btn v-del", title: "Eliminar bóveda (solo si está vacía)", "aria-label": "Eliminar “" + v.name + "”", text: "🗑",
+          onclick: (ev) => { ev.stopPropagation(); deleteVault(v); } }),
+        el("span", { class: "v-chev", "aria-hidden": "true", text: "›" }))));
     }
     $("vaultListEmpty").hidden = rows.length > 0;
-    $("vaultsCount").textContent = account ? account.email : "";
     const tl = $("trashList"); tl.textContent = "";
     for (const v of trashIndex) {
       tl.append(el("li", null, el("div", { class: "v-row" },
@@ -613,6 +614,7 @@
         el("button", { type: "button", class: "btn small", text: "Restaurar", onclick: () => restoreVault(v) }))));
     }
     $("trashBox").hidden = trashIndex.length === 0;
+    $("trashCount").textContent = trashIndex.length;
     renderLegacy();
   }
   function renderLegacy() {
@@ -903,7 +905,7 @@
   }
   function refreshVaultLabels() {
     if (!S) return;
-    $("vaultTitle").textContent = "🔓 " + S.name;
+    $("vaultTitle").textContent = S.name;
     $("renameInput").value = S.name;
     if (current === "vault") $("tbTitle").textContent = S.name;
     renderNavVaults();
@@ -918,7 +920,7 @@
     clearTimeout(syncTimer);
     document.querySelectorAll("dialog[open]").forEach((d) => d.close());
     $("entryList").textContent = "";
-    ["search", "fTitle", "fUrl", "fUser", "fPass", "fNotes", "ioText", "ioPw", "renameInput"].forEach((i) => ($(i).value = ""));
+    ["search", "fTitle", "fUser", "fPass", "fNotes", "ioText", "ioPw", "renameInput"].forEach((i) => ($(i).value = ""));
     $("ioNotes").textContent = "";
     ioResults = [];
     $("syncChip").hidden = true;
@@ -976,8 +978,7 @@
     window.scrollTo(0, 0);
   }
   function vaultTab(t) {
-    $("tabEntries").setAttribute("aria-selected", t === "entries");
-    $("tabVaultOpts").setAttribute("aria-selected", t !== "entries");
+    $("tabVaultOpts").setAttribute("aria-pressed", String(t !== "entries"));
     $("paneEntries").hidden = t !== "entries";
     $("paneVaultOpts").hidden = t === "entries";
     if (t !== "entries") renderDriveInfo();
@@ -993,10 +994,10 @@
     if (!S) return;
     const q = fold($("search").value.trim());
     const all = live().sort((a, b) => a.title.localeCompare(b.title, "es", { sensitivity: "base" }));
-    const items = q ? all.filter((e) => fold([e.title, e.url, e.username, e.notes].join("\n")).includes(q)) : all;
+    const items = q ? all.filter((e) => fold([e.title, e.username, e.notes].join("\n")).includes(q)) : all;
     for (const e of items) {
-      const title = e.title || hostOf(e.url) || "(sin nombre)";
-      const sub = e.username || hostOf(e.url) || "";
+      const title = e.title || "(sin nombre)";
+      const sub = e.username || "";
       list.append(el("li", { class: "entry", onclick: () => openEntry(e.id) },
         el("div", { class: "avatar", style: { background: colorFor(title) }, text: [...title][0] || "?" }),
         el("div", { class: "e-main" }, el("div", { class: "e-title", text: title }), el("div", { class: "e-sub", text: sub })),
@@ -1008,6 +1009,7 @@
     empty.hidden = items.length > 0;
     empty.firstElementChild.textContent = all.length ? "No hay resultados para esa búsqueda." : "Esta bóveda está vacía.";
     empty.lastElementChild.hidden = all.length > 0;
+    $("vaultSub").textContent = all.length === 1 ? "1 entrada" : all.length + " entradas";
   }
 
   // ---------- respaldo manual ----------
@@ -1044,26 +1046,26 @@
     if (!S) return;
     editingId = id || null;
     const e = id ? S.data.entries.find((x) => x.id === id) : null;
-    const v = e || Object.assign({ title: "", url: "", username: "", password: "", notes: "" }, preset || {});
+    const v = e || Object.assign({ title: "", username: "", password: "", notes: "" }, preset || {});
     $("entryDialogTitle").textContent = e ? "Editar entrada" : "Nueva entrada";
-    $("fTitle").value = v.title; $("fUrl").value = v.url; $("fUser").value = v.username; $("fPass").value = v.password; $("fNotes").value = v.notes;
+    $("fTitle").value = v.title; $("fUser").value = v.username; $("fPass").value = v.password; $("fNotes").value = v.notes;
     setPwVisible("fPass", false);
     $("fDelete").hidden = !e;
     $("fDates").textContent = e ? "Creada: " + fmtDate(e.createdAt) + " · Modificada: " + fmtDate(e.updatedAt) : "";
-    updateEntryStrength();
+    updateEntryStrength(); loadEntryGen();
     $("entryDialog").showModal();
     if (!e) setTimeout(() => $("fTitle").focus(), 30);
   }
   function updateEntryStrength() {
     const p = $("fPass").value;
-    $("fPassStrength").textContent = p ? "· " + strength(p).label : "";
+    $("fPassStrength").textContent = p ? "Seguridad: " + strength(p).label : "";
   }
-  function clearEntryForm() { ["fTitle", "fUrl", "fUser", "fPass", "fNotes"].forEach((i) => ($(i).value = "")); }
+  function clearEntryForm() { ["fTitle", "fUser", "fPass", "fNotes"].forEach((i) => ($(i).value = "")); }
   async function saveEntry(ev) {
     ev.preventDefault();
     if (!S) return;
-    const vals = { title: $("fTitle").value.trim(), url: $("fUrl").value.trim(), username: $("fUser").value.trim(), password: $("fPass").value, notes: $("fNotes").value };
-    if (!vals.title && !vals.url && !vals.username && !vals.password && !vals.notes) { toast("La entrada está vacía."); return; }
+    const vals = { title: $("fTitle").value.trim(), username: $("fUser").value.trim(), password: $("fPass").value, notes: $("fNotes").value };
+    if (!vals.title && !vals.username && !vals.password && !vals.notes) { toast("La entrada está vacía."); return; }
     const t = now();
     if (editingId) {
       const i = S.data.entries.findIndex((x) => x.id === editingId);
@@ -1187,6 +1189,13 @@
     if (m && (m[1].includes("@") || /^[\w.\-]+$/.test(m[1]))) return { username: m[1], password: m[2], review: true };
     return { username: "", password: value, review: /\s/.test(value) };
   }
+  // Las entradas no tienen campo de dirección web: si la nota traía un link, va a las notas.
+  function withoutUrl(e) {
+    const r = Object.assign({}, e);
+    if (r.url) r.notes = [r.url, r.notes].filter(Boolean).join("\n");
+    delete r.url;
+    return r;
+  }
   // Convierte el texto de una nota en una o varias entradas candidatas.
   function parseOldNote(text) {
     const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
@@ -1208,7 +1217,7 @@
       }
       e.notes = [e.notes, ...extra].filter(Boolean).join("\n");
       if (!e.title) e.title = hostOf(e.url) || "Nota importada";
-      return [e];
+      return [withoutUrl(e)];
     }
     // Una entrada por línea "sitio: contraseña" (o "sitio: usuario contraseña").
     const out = [];
@@ -1225,7 +1234,7 @@
       }
     }
     if (!out.length) out.push({ title: "Nota importada", url: "", username: "", password: "", notes: text, review: true });
-    return out;
+    return out.map(withoutUrl);
   }
   function openImportOld() {
     $("ioStep1").hidden = false; $("ioStep2").hidden = true; $("ioFoot").hidden = true;
@@ -1300,7 +1309,7 @@
     const t = now();
     let n = 0;
     for (const r of ioResults) if (r.ok) for (const c of r.cands) if (c.selected) {
-      S.data.entries.push(normEntry({ id: uuid(), title: c.title.trim(), url: c.url.trim(), username: c.username.trim(), password: c.password, notes: c.notes, createdAt: t, updatedAt: t }));
+      S.data.entries.push(normEntry({ id: uuid(), title: c.title.trim(), username: c.username.trim(), password: c.password, notes: c.notes, createdAt: t, updatedAt: t }));
       n++;
     }
     ioResults = []; $("ioNotes").textContent = ""; $("ioText").value = ""; $("ioPw").value = "";
@@ -1576,22 +1585,29 @@
   };
   $("syncChip").onclick = () => { if (!Drive.hasToken()) signIn("vaultMsg"); else sync(); };
   $("tabEntries").onclick = () => vaultTab("entries");
-  $("tabVaultOpts").onclick = () => vaultTab("opts");
+  $("tabVaultOpts").onclick = () => vaultTab($("paneVaultOpts").hidden ? "opts" : "entries");
   $("search").addEventListener("input", renderEntries);
   $("addEntry").onclick = () => openEntry(null);
+  $("addEntryEmpty").onclick = () => openEntry(null);
+  $("importOldEmpty").onclick = openImportOld;
   $("entryForm").addEventListener("submit", saveEntry);
   $("entryDialog").addEventListener("cancel", clearEntryForm);
   $("fDelete").onclick = deleteEntry;
   $("fCopyUser").onclick = () => copyText($("fUser").value, false);
   $("fCopyPass").onclick = () => copyText($("fPass").value, true);
-  $("fOpenUrl").onclick = () => {
-    const u = $("fUrl").value.trim(); if (!u) return;
-    window.open(/^https?:\/\//i.test(u) ? u : "https://" + u, "_blank", "noopener,noreferrer");
-  };
   $("fGen").onclick = () => {
+    let o;
+    try { o = genOptions("fg"); } catch (e) { toast(errText(e), 3500); $("fGenOpts").hidden = false; $("fGenMore").setAttribute("aria-expanded", "true"); return; }
     if ($("fPass").value && !confirm("¿Reemplazar la contraseña actual por una nueva? (Recordá cambiarla también en el sitio.)")) return;
-    $("fPass").value = quickGenerate(); setPwVisible("fPass", true); updateEntryStrength();
+    $("fPass").value = generatePassword(o.length, o.sets); setPwVisible("fPass", true); updateEntryStrength();
   };
+  $("fGenMore").onclick = () => {
+    const open = $("fGenOpts").hidden;
+    $("fGenOpts").hidden = !open; $("fGenMore").setAttribute("aria-expanded", String(open));
+    $("fGenMore").textContent = open ? "Menos opciones" : "Opciones";
+  };
+  $("fgLenRange").addEventListener("input", () => { $("fgLen").value = $("fgLenRange").value; saveGenPrefs("fg"); });
+  ["fgLen", "fgLower", "fgUpper", "fgDigits", "fgSymbols", "fgSymbolSet"].forEach((i) => $(i).addEventListener("change", () => saveGenPrefs("fg")));
   $("fPass").addEventListener("input", updateEntryStrength);
   $("driveSyncNow").onclick = () => sync();
   $("exportBtn").onclick = exportVault;
@@ -1612,15 +1628,29 @@
   };
 
   // Generador
-  function loadGenPrefs() {
+  // El generador de la herramienta y el de la entrada comparten las mismas opciones guardadas.
+  function loadGenPrefs(px = "gen") {
     const g = prefs.gen;
-    $("genLen").value = g.len; $("genLower").checked = g.lower; $("genUpper").checked = g.upper; $("genDigits").checked = g.digits; $("genSymbols").checked = g.symbols; $("genSymbolSet").value = g.symbolSet;
+    $(px + "Len").value = g.len; $(px + "Lower").checked = g.lower; $(px + "Upper").checked = g.upper; $(px + "Digits").checked = g.digits; $(px + "Symbols").checked = g.symbols; $(px + "SymbolSet").value = g.symbolSet;
+    if (px === "fg") { $("fgLenRange").value = Math.min(64, Number(g.len) || 20); $("fgSymbolSet").disabled = !g.symbols; }
   }
-  function saveGenPrefs() {
-    prefs.gen = { len: Number($("genLen").value) || 20, lower: $("genLower").checked, upper: $("genUpper").checked, digits: $("genDigits").checked, symbols: $("genSymbols").checked, symbolSet: $("genSymbolSet").value };
+  function saveGenPrefs(px = "gen") {
+    prefs.gen = { len: Number($(px + "Len").value) || 20, lower: $(px + "Lower").checked, upper: $(px + "Upper").checked, digits: $(px + "Digits").checked, symbols: $(px + "Symbols").checked, symbolSet: $(px + "SymbolSet").value };
     savePrefs();
+    loadGenPrefs(px === "gen" ? "fg" : "gen");
+    if (px === "fg") { $("fgLenRange").value = Math.min(64, Number($("fgLen").value) || 20); $("fgSymbolSet").disabled = !$("fgSymbols").checked; }
+    genSummary();
   }
-  ["genLen", "genLower", "genUpper", "genDigits", "genSymbols", "genSymbolSet"].forEach((i) => $(i).addEventListener("change", saveGenPrefs));
+  function genSummary() {
+    const g = prefs.gen;
+    const kinds = [g.lower && "minúsculas", g.upper && "mayúsculas", g.digits && "números", g.symbols && "símbolos"].filter(Boolean);
+    $("fGenSummary").textContent = g.len + " caracteres" + (kinds.length ? ": " + kinds.join(", ") : "");
+  }
+  function loadEntryGen() {
+    loadGenPrefs("fg"); genSummary();
+    $("fGenOpts").hidden = true; $("fGenMore").setAttribute("aria-expanded", "false"); $("fGenMore").textContent = "Opciones";
+  }
+  ["genLen", "genLower", "genUpper", "genDigits", "genSymbols", "genSymbolSet"].forEach((i) => $(i).addEventListener("change", () => saveGenPrefs("gen")));
   $("genRun").onclick = async () => {
     hideMsg("genMsg");
     let o;
