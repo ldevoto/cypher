@@ -239,3 +239,6 @@ dialog.sheet > form, dialog.sheet > div { display: flex; flex-direction: column;
 .gen-opts-box .gen-opts label { display: flex; align-items: center; gap: 6px; margin: 0; }
 .gen-opts-box .gen-opts input { width: auto; min-height: 0; }
 #addEntry { font-size: 20px; min-width: 46px; } @media (min-width: 600px) { #addEntry { font-size: 15px; } }
+.brand-link { flex: 0 1 auto; margin-right: auto; color: inherit; text-decoration: none; font-size: 18px; letter-spacing: .01em; border-radius: 10px; padding: 4px 8px 4px 4px; margin-left: -4px; }
+.brand-link:hover { background: var(--panel); }
+.brand-link img { border-radius: 8px; }

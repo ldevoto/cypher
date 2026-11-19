@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  const APP_VERSION = "1.2.0";
+  const APP_VERSION = "1.2.1";
   const CFG = window.CYPHER_CONFIG || {};
   const $ = (id) => document.getElementById(id);
   const te = new TextEncoder();
@@ -907,7 +907,6 @@
     if (!S) return;
     $("vaultTitle").textContent = S.name;
     $("renameInput").value = S.name;
-    if (current === "vault") $("tbTitle").textContent = S.name;
     renderNavVaults();
   }
   // Cierra la bóveda abierta y borra de memoria todo lo descifrado.
@@ -957,7 +956,6 @@
   // Vistas
   // =====================================================================
   let current = "vaults";
-  const TITLES = { vaults: "Bóvedas", unlock: "Abrir bóveda", create: "Nueva bóveda", gen: "Generar contraseña", text: "Cifrar texto", settings: "Ajustes" };
   function showView(v) {
     if (v === "vault" && !S) v = "vaults";
     current = v;
@@ -966,7 +964,6 @@
     document.querySelectorAll(".nv").forEach((b) => b.setAttribute("aria-current", b.dataset.view === navKey && !(v === "vault" || v === "unlock") ? "page" : "false"));
     // En celular el botón “Bóvedas” queda marcado también dentro de una bóveda.
     if (window.matchMedia("(max-width: 899px)").matches) document.querySelectorAll(".nv").forEach((b) => { if (b.dataset.view === navKey) b.setAttribute("aria-current", "page"); });
-    $("tbTitle").textContent = v === "vault" && S ? S.name : TITLES[v] || "Cypher";
     if (v === "vaults") {
       const offline = !navigator.onLine;
       $("vaultsOffline").hidden = !offline;
