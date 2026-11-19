@@ -40,12 +40,12 @@
 
   <nav class="nav" id="nav">
     <div class="nav-section">
-      <div class="nav-label">Con tu cuenta de Google</div>
+      <div class="nav-label">Contraseñas en Drive</div>
       <button type="button" data-view="vaults" class="nv"><span class="ico">🗄️</span><span>Bóvedas</span></button>
       <div class="nav-vaults" id="navVaults"></div>
     </div>
     <div class="nav-section">
-      <div class="nav-label">Sin cuenta</div>
+      <div class="nav-label">Herramientas</div>
       <button type="button" data-view="gen" class="nv"><span class="ico">🎲</span><span>Generar</span></button>
       <button type="button" data-view="text" class="nv"><span class="ico">🔐</span><span>Cifrar texto</span></button>
     </div>
@@ -71,21 +71,24 @@
       </div>
       <div id="vaultsList" hidden>
         <div class="msg warn" id="legacyBanner" role="status"></div>
-        <div class="section-head"><h2>Tus bóvedas</h2><span class="small" id="vaultsCount"></span></div>
-        <ul class="vault-list" id="vaultList"></ul>
-        <p class="empty small" id="vaultListEmpty">Todavía no tenés bóvedas. Creá la primera.</p>
-        <div class="actions">
+        <div class="page-head">
+          <h2>Tus bóvedas</h2>
+          <button type="button" class="icon-btn" id="refreshVaults" title="Actualizar la lista desde Drive" aria-label="Actualizar">↻</button>
           <button type="button" class="btn primary" id="createOpen">+ Nueva bóveda</button>
-          <button type="button" class="btn" id="importCopyBtn">Subir una copia (.cypher)</button>
-          <button type="button" class="btn ghost" id="refreshVaults">↻ Actualizar</button>
         </div>
-        <input type="file" id="fileImportCopy" accept=".cypher,application/json,application/octet-stream" hidden>
         <div class="msg" id="vaultsMsg" role="status"></div>
-        <div id="trashBox" hidden>
-          <div class="section-head"><h2>En la papelera de Drive</h2></div>
-          <p class="small">Estas bóvedas se eliminaron (por la app o desde Drive). Google las guarda 30 días en la papelera; podés restaurarlas.</p>
-          <ul class="vault-list" id="trashList"></ul>
+        <ul class="vault-list" id="vaultList"></ul>
+        <div class="empty" id="vaultListEmpty">
+          <p>Todavía no tenés bóvedas.</p>
+          <p class="small">Una bóveda guarda tus contraseñas cifradas con una clave maestra. Podés tener varias (Personal, Trabajo…).</p>
         </div>
+        <p class="small list-foot">¿Tenés una copia descargada? <button type="button" class="link" id="importCopyBtn">Subir un archivo .cypher</button></p>
+        <input type="file" id="fileImportCopy" accept=".cypher,application/json,application/octet-stream" hidden>
+        <details id="trashBox" class="trash" hidden>
+          <summary>Papelera de Drive (<span id="trashCount">0</span>)</summary>
+          <p class="small">Bóvedas eliminadas desde la app o desde Drive. Google las guarda 30 días en la papelera; después se borran para siempre.</p>
+          <ul class="vault-list" id="trashList"></ul>
+        </details>
       </div>
     </section>
 
@@ -124,25 +127,28 @@
     <!-- ---------- BÓVEDA ABIERTA ---------- -->
     <section id="view-vault" class="view" hidden>
       <div class="vault-head">
-        <button type="button" class="link" data-go="vaults">← Bóvedas</button>
-        <h2 id="vaultTitle"></h2>
-        <button type="button" class="btn small" id="lockBtn">🔒 Cerrar bóveda</button>
+        <button type="button" class="icon-btn back-btn" data-go="vaults" title="Volver a tus bóvedas" aria-label="Volver a tus bóvedas">←</button>
+        <div class="vh-title"><h2 id="vaultTitle"></h2><div class="small" id="vaultSub"></div></div>
+        <button type="button" class="btn small" id="tabVaultOpts" aria-pressed="false" title="Opciones de la bóveda">⚙<span class="hide-sm"> Opciones</span></button>
+        <button type="button" class="btn small" id="lockBtn" title="Cerrar bóveda">🔒<span class="hide-sm"> Cerrar</span></button>
       </div>
       <div class="msg warn" id="vaultBanner" role="status"></div>
-      <div class="tabs subtabs" role="tablist">
-        <button type="button" id="tabEntries" role="tab" aria-selected="true">Entradas</button>
-        <button type="button" id="tabVaultOpts" role="tab" aria-selected="false">Opciones de la bóveda</button>
-      </div>
       <div id="paneEntries">
-        <div class="searchbar"><input type="search" id="search" placeholder="Buscar sitio, usuario, nota…" autocomplete="off" spellcheck="false"></div>
+        <div class="toolbar">
+          <input type="search" id="search" placeholder="Buscar por nombre, usuario o nota…" autocomplete="off" spellcheck="false">
+          <button type="button" class="btn primary" id="addEntry" title="Nueva entrada">+<span class="hide-sm"> Nueva entrada</span></button>
+        </div>
         <ul class="entries" id="entryList"></ul>
         <div class="empty" id="entryEmpty">
           <p>Esta bóveda está vacía.</p>
-          <p class="small">Tocá <b>+</b> para agregar tu primera contraseña, o importá tus notas cifradas viejas desde <b>Opciones de la bóveda</b>.</p>
+          <div>
+            <button type="button" class="btn primary" id="addEntryEmpty">+ Agregar la primera contraseña</button>
+            <p class="small">¿Tenías notas cifradas con el cifrador anterior? <button type="button" class="link" id="importOldEmpty">Importalas acá</button></p>
+          </div>
         </div>
-        <button type="button" class="fab" id="addEntry" title="Nueva entrada" aria-label="Nueva entrada">+</button>
       </div>
       <div id="paneVaultOpts" hidden>
+        <button type="button" class="link back" id="tabEntries">← Volver a las entradas</button>
         <div class="panel">
           <h2>Guardado</h2>
           <p class="small" id="driveInfo"></p>
@@ -329,16 +335,37 @@
     <div class="sheet-body">
       <label for="fTitle">Nombre o sitio</label>
       <input type="text" id="fTitle" spellcheck="false" placeholder="Ej: Gmail">
-      <label for="fUrl">Dirección web (opcional)</label>
-      <div class="inline"><input type="url" id="fUrl" spellcheck="false" placeholder="https://…" inputmode="url"><button type="button" class="btn" id="fOpenUrl" title="Abrir sitio">↗</button></div>
-      <label for="fUser">Usuario o email</label>
+      <label for="fUser">Usuario o mail</label>
       <div class="inline"><input type="text" id="fUser" spellcheck="false" autocapitalize="off"><button type="button" class="btn" id="fCopyUser">Copiar</button></div>
       <label for="fPass">Contraseña</label>
       <div class="inline">
         <div class="pw grow"><input type="password" id="fPass" spellcheck="false" autocomplete="off" class="mono"><button type="button" data-toggle="fPass">Mostrar</button></div>
         <button type="button" class="btn" id="fCopyPass">Copiar</button>
       </div>
-      <div class="hint"><button type="button" class="link" id="fGen">🎲 Generar una nueva</button> <span id="fPassStrength"></span></div>
+      <div class="hint"><span id="fPassStrength"></span></div>
+      <div class="gen-box">
+        <div class="gen-row">
+          <button type="button" class="btn small" id="fGen">🎲 Generar</button>
+          <span class="small grow" id="fGenSummary"></span>
+          <button type="button" class="link" id="fGenMore" aria-expanded="false">Opciones</button>
+        </div>
+        <div id="fGenOpts" class="gen-opts-box" hidden>
+          <div class="gen-line">
+            <label for="fgLen">Longitud</label>
+            <input type="range" id="fgLenRange" min="8" max="64" step="1" value="20" aria-label="Longitud">
+            <input type="number" id="fgLen" min="8" max="128" step="1" value="20" inputmode="numeric" class="num">
+          </div>
+          <div class="gen-opts">
+            <label><input type="checkbox" id="fgLower" checked> Minúsculas</label>
+            <label><input type="checkbox" id="fgUpper" checked> Mayúsculas</label>
+            <label><input type="checkbox" id="fgDigits" checked> Números</label>
+            <label><input type="checkbox" id="fgSymbols" checked> Símbolos</label>
+          </div>
+          <label for="fgSymbolSet">Símbolos permitidos (sacá los que el sitio no acepte)</label>
+          <input type="text" id="fgSymbolSet" spellcheck="false" autocomplete="off">
+          <div class="hint">Estas opciones se recuerdan y son las mismas que las de la herramienta Generar.</div>
+        </div>
+      </div>
       <label for="fNotes">Notas</label>
       <textarea id="fNotes" spellcheck="false" rows="4"></textarea>
       <p class="small" id="fDates"></p>
