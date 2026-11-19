@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  const APP_VERSION = "1.2.1";
+  const APP_VERSION = "1.2.2";
   const CFG = window.CYPHER_CONFIG || {};
   const $ = (id) => document.getElementById(id);
   const te = new TextEncoder();

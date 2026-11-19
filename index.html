@@ -68,6 +68,7 @@
         <p class="small">Las bóvedas se guardan cifradas en tu Google Drive. Iniciá sesión con tu cuenta de Google para verlas, crear nuevas o abrirlas con su clave maestra.</p>
         <button type="button" class="btn primary" id="signInMain">Iniciar sesión con Google</button>
         <div class="msg" id="loginMsg" role="status"></div>
+        <p class="small legal">Cypher es gratis y de código abierto. Solo pide permiso para manejar sus propios archivos en tu Drive. <a href="privacy.html">Política de privacidad</a></p>
       </div>
       <div id="vaultsList" hidden>
         <div class="msg warn" id="legacyBanner" role="status"></div>
@@ -321,6 +322,7 @@
           <p class="small">Cada bóveda es un único archivo cifrado con AES-256-GCM. La clave se deriva de tu clave maestra con PBKDF2-SHA256 (600.000 iteraciones) y una sal aleatoria propia de cada bóveda. Todo se cifra y descifra en tu dispositivo: a Google Drive solo llega el archivo cifrado.</p>
           <p class="small">Las bóvedas nuevas se guardan en la carpeta <b>Cypher</b> de tu Drive (“Mi unidad”), con nombre “Cypher - Nombre.cypher”. Podés moverlas a otra carpeta: la app las encuentra igual. Si las borrás desde Drive van a la papelera y la app te ofrece restaurarlas durante 30 días. Drive guarda además versiones anteriores de cada archivo. La app solo puede ver los archivos que ella misma creó (permiso <code>drive.file</code>), no el resto de tu Drive.</p>
           <p class="small">El nombre de la bóveda se guarda sin cifrar para poder listarla. La clave maestra nunca se guarda ni se envía a ningún lado.</p>
+          <p class="small"><a href="privacy.html">Política de privacidad</a> · <a href="https://github.com/ldevoto/cypher" rel="noopener">Código fuente</a></p>
           <p class="small">El cifrador anterior (una sola página, sin conexión a internet) sigue disponible en <a href="cifrador.html" target="_blank" rel="noopener">cifrador.html</a>.</p>
           <p class="small">Versión <span id="appVersion"></span>.</p>
         </details>

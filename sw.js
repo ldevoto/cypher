@@ -1,8 +1,8 @@
 // Service worker: guarda la app para que funcione sin internet.
 // Cambiá VERSION en cada publicación para que los dispositivos bajen la versión nueva.
-const VERSION = "cypher-v1.2.1";
+const VERSION = "cypher-v1.2.2";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "config.js", "manifest.webmanifest",
-  "cifrador.html", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon.png"];
+  "cifrador.html", "privacy.html", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: "reload" })))));
