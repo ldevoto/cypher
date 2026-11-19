@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  const APP_VERSION = "1.0.2";
+  const APP_VERSION = "1.1.0";
   const CFG = window.CYPHER_CONFIG || {};
   const $ = (id) => document.getElementById(id);
   const te = new TextEncoder();
@@ -332,44 +332,50 @@
   const stateHash = (salt, iter, name, entries) => sha256(salt + "|" + iter + "|" + name + "|" + canon(entries));
 
   // =====================================================================
-  // Almacenamiento local
+  // Preferencias (lo único que se guarda en el dispositivo: nada sensible)
   // =====================================================================
-  const LS_SETTINGS = "cypher.settings.v1", LS_VAULTS = "cypher.vaults.v1";
-  const settings = Object.assign({
-    autoLockMin: 5, rememberLocal: true, driveLinked: false, lastVaultId: null,
+  const LS_PREFS = "cypher.prefs.v2";
+  const LEGACY_SETTINGS = "cypher.settings.v1", LEGACY_VAULTS = "cypher.vaults.v1";
+  const prefs = Object.assign({
+    autoLockMin: 5,
     gen: { len: 20, lower: true, upper: true, digits: true, symbols: true, symbolSet: DEFAULT_SYMBOLS },
-  }, loadJSON(LS_SETTINGS, {}));
-  const saveSettings = () => saveJSON(LS_SETTINGS, settings);
+  }, loadJSON(LS_PREFS, {}));
+  (() => { // migra preferencias de la versión anterior y borra lo demás
+    const old = loadJSON(LEGACY_SETTINGS, null);
+    if (old) {
+      if (!localStorage.getItem(LS_PREFS)) { if (old.autoLockMin) prefs.autoLockMin = old.autoLockMin; if (old.gen) prefs.gen = old.gen; saveJSON(LS_PREFS, prefs); }
+      localStorage.removeItem(LEGACY_SETTINGS);
+    }
+  })();
+  const savePrefs = () => saveJSON(LS_PREFS, prefs);
 
-  // Registro de bóvedas conocidas: { [vaultId]: { id, name, env, driveFileId, lastExportAt, updatedAt } }
-  // Si "rememberLocal" está apagado, el sobre cifrado queda solo en memoria.
-  const vaults = loadJSON(LS_VAULTS, {});
-  const memEnv = {};
-  function saveVaults() {
-    const copy = {};
-    for (const [id, v] of Object.entries(vaults)) copy[id] = Object.assign({}, v, { env: settings.rememberLocal ? v.env : null });
-    saveJSON(LS_VAULTS, copy);
-  }
-  function getEnv(id) { return memEnv[id] || (vaults[id] && vaults[id].env) || null; }
-  function setEnv(id, env) { memEnv[id] = env; vaults[id].env = env; vaults[id].name = env.name; saveVaults(); }
-
-  // Bóvedas vistas en Drive en esta sesión (sin descargar): { vaultId: {fileId, name, modifiedTime} }
-  const driveSeen = {};
+  // Bóvedas que guardaba la versión anterior en este navegador. Las que ya estaban subidas a Drive se borran;
+  // las que no, se ofrecen para descargar antes de borrarlas.
+  let legacyVaults = [];
+  (() => {
+    const old = loadJSON(LEGACY_VAULTS, null);
+    if (!old) return;
+    legacyVaults = Object.values(old).filter((v) => v && v.env && !(v.driveFileId && (v.lastSyncAt || 0) >= (v.updatedAt || 0) - 5000));
+    if (!legacyVaults.length) localStorage.removeItem(LEGACY_VAULTS);
+  })();
 
   // =====================================================================
-  // Google Drive (Google Identity Services + Drive API v3, permiso drive.file)
+  // Google: inicio de sesión (Google Identity Services) + Drive API v3 (permiso drive.file)
+  // El token vive solo en memoria: al cerrar o recargar la app hay que volver a iniciar sesión.
   // =====================================================================
   const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
   const API = "https://www.googleapis.com/drive/v3";
   const UPLOAD = "https://www.googleapis.com/upload/drive/v3";
+  const FOLDER_MIME = "application/vnd.google-apps.folder";
   class DriveAuthError extends UserError {}
+  class OfflineError extends UserError {}
   const Drive = {
-    token: null, exp: 0, client: null, gisPromise: null, pending: null,
+    token: null, exp: 0, client: null, gisPromise: null, pending: null, nextPrompt: "",
     configured() {
       return !!CFG.googleClientId && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1");
     },
     load() {
-      if (!this.configured()) return Promise.reject(new UserError("Google Drive todavía no está configurado en esta app."));
+      if (!this.configured()) return Promise.reject(new UserError("El inicio de sesión con Google no está configurado en esta copia de la app."));
       if (this.gisPromise) return this.gisPromise;
       this.gisPromise = new Promise((resolve, reject) => {
         const done = () => {
@@ -384,7 +390,7 @@
         const s = document.createElement("script");
         s.src = "https://accounts.google.com/gsi/client"; s.async = true;
         s.onload = done;
-        s.onerror = () => { this.gisPromise = null; reject(new UserError("No se pudo cargar el inicio de sesión de Google. ¿Hay internet?")); };
+        s.onerror = () => { this.gisPromise = null; reject(new OfflineError("No se pudo cargar el inicio de sesión de Google. ¿Hay internet?")); };
         document.head.appendChild(s);
       });
       return this.gisPromise;
@@ -395,10 +401,10 @@
       const p = this.pending; this.pending = null;
       if (r && r.access_token && google.accounts.oauth2.hasGrantedAllScopes(r, DRIVE_SCOPE)) {
         this.token = r.access_token; this.exp = now() + (Number(r.expires_in) || 3600) * 1000;
-        if (!settings.driveLinked) { settings.driveLinked = true; saveSettings(); }
+        this.nextPrompt = "";
         p && p.resolve();
       } else {
-        p && p.reject(new UserError(r && r.error ? "Google rechazó el acceso: " + r.error : "No se otorgó el permiso para Google Drive."));
+        p && p.reject(new UserError(r && r.error ? "Google rechazó el acceso: " + r.error : "No se otorgó el permiso para Google Drive. Para usar bóvedas tenés que tildar el acceso a Drive."));
       }
     },
     _onError(e) {
@@ -413,20 +419,22 @@
       if (this.pending) this.pending.reject(new UserError("Reemplazado por otra solicitud."));
       return new Promise((resolve, reject) => {
         this.pending = { resolve, reject };
-        this.client.requestAccessToken({ prompt: settings.driveLinked ? "" : "consent" });
+        this.client.requestAccessToken({ prompt: this.nextPrompt });
       });
     },
-    revoke() {
-      if (this.token && window.google) try { google.accounts.oauth2.revoke(this.token, () => {}); } catch { /* nada */ }
+    forget() {
       this.token = null; this.exp = 0;
+      this.nextPrompt = "select_account"; // al volver a entrar, que deje elegir la cuenta
     },
     async api(url, opts = {}) {
-      if (!this.hasToken()) throw new DriveAuthError("Hay que volver a conectar Google Drive.");
+      if (!navigator.onLine) throw new OfflineError("Sin conexión a internet.");
+      if (!this.hasToken()) throw new DriveAuthError("La sesión de Google venció. Volvé a iniciar sesión.");
       const headers = Object.assign({ Authorization: "Bearer " + this.token }, opts.headers || {});
       let res;
-      try { res = await fetch(url, Object.assign({}, opts, { headers })); }
-      catch { throw new UserError("Sin conexión con Google Drive."); }
-      if (res.status === 401) { this.token = null; throw new DriveAuthError("La sesión de Google venció. Volvé a conectar Drive."); }
+      // cache: "no-store" para que el navegador no guarde copias de las respuestas (ni siquiera cifradas).
+      try { res = await fetch(url, Object.assign({ cache: "no-store" }, opts, { headers })); }
+      catch { throw new OfflineError("Sin conexión con Google Drive."); }
+      if (res.status === 401) { this.token = null; throw new DriveAuthError("La sesión de Google venció. Volvé a iniciar sesión."); }
       if (!res.ok) {
         let msg = res.status + "";
         try { const j = await res.json(); msg += " " + ((j.error && j.error.message) || ""); } catch { /* nada */ }
@@ -436,9 +444,14 @@
       }
       return res;
     },
-    async listVaults() {
-      const q = "appProperties has { key='cypherVault' and value='1' } and trashed=false";
-      const url = API + "/files?" + new URLSearchParams({ q, spaces: "drive", pageSize: "100", orderBy: "modifiedTime desc",
+    async about() {
+      const j = await (await this.api(API + "/about?fields=user(displayName,emailAddress,photoLink)")).json();
+      const u = j.user || {};
+      return { name: u.displayName || "", email: u.emailAddress || "", photo: u.photoLink || "" };
+    },
+    async listVaults(trashed) {
+      const q = "appProperties has { key='cypherVault' and value='1' } and trashed=" + (trashed ? "true" : "false");
+      const url = API + "/files?" + new URLSearchParams({ q, spaces: "drive", pageSize: "200", orderBy: "name",
         fields: "files(id,name,version,modifiedTime,appProperties)" });
       const j = await (await this.api(url)).json();
       return (j.files || []).filter((f) => f.appProperties && f.appProperties.vaultId);
@@ -449,6 +462,21 @@
     },
     async download(id) {
       return (await this.api(API + "/files/" + encodeURIComponent(id) + "?alt=media")).text();
+    },
+    async setTrashed(id, trashed) {
+      return (await this.api(API + "/files/" + encodeURIComponent(id) + "?fields=id,trashed",
+        { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trashed }) })).json();
+    },
+    // Carpeta "Cypher" en Mi unidad (la crea la app, así que la puede ver con drive.file).
+    async folderId() {
+      if (this._folder) return this._folder;
+      const q = "appProperties has { key='cypherFolder' and value='1' } and mimeType='" + FOLDER_MIME + "' and trashed=false";
+      const j = await (await this.api(API + "/files?" + new URLSearchParams({ q, spaces: "drive", fields: "files(id)" }))).json();
+      if (j.files && j.files.length) return (this._folder = j.files[0].id);
+      const r = await (await this.api(API + "/files?fields=id", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Cypher", mimeType: FOLDER_MIME, appProperties: { cypherFolder: "1" },
+          description: "Bóvedas cifradas de Cypher. Podés moverlas, pero no las edites a mano." }) })).json();
+      return (this._folder = r.id);
     },
     _multipart(meta, content) {
       const boundary = "cypher" + b64urlEncode(rand(12));
@@ -461,362 +489,447 @@
       return { name: "Cypher - " + safe + ".cypher", appProperties: { cypherVault: "1", vaultId: env.vaultId, vaultName: env.name.slice(0, 60) } };
     },
     async create(env) {
-      const m = Object.assign({ mimeType: "application/octet-stream", description: "Bóveda cifrada de Cypher. No la edites a mano." }, this.fileMeta(env));
+      const parents = [await this.folderId()];
+      const m = Object.assign({ mimeType: "application/octet-stream", parents, description: "Bóveda cifrada de Cypher. No la edites a mano." }, this.fileMeta(env));
       const { body, type } = this._multipart(m, JSON.stringify(env));
-      const res = await this.api(UPLOAD + "/files?uploadType=multipart&fields=id,version,modifiedTime", { method: "POST", headers: { "Content-Type": type }, body });
-      return res.json();
+      return (await this.api(UPLOAD + "/files?uploadType=multipart&fields=id,version,modifiedTime", { method: "POST", headers: { "Content-Type": type }, body })).json();
     },
     async update(id, env) {
       const { body, type } = this._multipart(this.fileMeta(env), JSON.stringify(env));
-      const res = await this.api(UPLOAD + "/files/" + encodeURIComponent(id) + "?uploadType=multipart&fields=id,version,modifiedTime",
-        { method: "PATCH", headers: { "Content-Type": type }, body });
-      return res.json();
+      return (await this.api(UPLOAD + "/files/" + encodeURIComponent(id) + "?uploadType=multipart&fields=id,version,modifiedTime",
+        { method: "PATCH", headers: { "Content-Type": type }, body })).json();
     },
   };
 
   // =====================================================================
-  // Sesión abierta
+  // Cuenta y lista de bóvedas (en memoria)
   // =====================================================================
-  // S = { vaultId, name, key, salt, iter, data:{entries,createdAt}, driveVersion, syncedHash }
+  let account = null;          // { name, email, photo }
+  let vaultIndex = null;       // [{ fileId, vaultId, name, modifiedTime, version }] o null si no se cargó
+  let trashIndex = [];
+  let loginBusy = false;
+
+  function renderAccount() {
+    const signedIn = !!account;
+    $("signInTop").hidden = signedIn;
+    $("acctBtn").hidden = !signedIn;
+    if (!signedIn) { $("acctMenu").hidden = true; return; }
+    const img = $("acctPhoto");
+    if (account.photo) { img.src = account.photo; img.hidden = false; } else { img.removeAttribute("src"); }
+    $("acctName").textContent = account.name || account.email;
+    $("acctEmail").textContent = account.name ? account.email : "";
+    $("acctMenuName").textContent = account.name || "";
+    $("acctMenuEmail").textContent = account.email;
+    $("acctBtn").title = "Sesión iniciada: " + account.email;
+  }
+
+  // Iniciar sesión: tiene que arrancar desde un clic.
+  function signIn(msgId) {
+    if (loginBusy) return;
+    if (!navigator.onLine) { showVaults(); return; }
+    if (!Drive.configured()) { showMsg(msgId, "err", "El inicio de sesión con Google no está configurado en esta copia de la app."); return; }
+    if (!Drive.ready()) {
+      showMsg(msgId, "info", "Cargando Google…");
+      Drive.load().then(() => showMsg(msgId, "info", "Listo. Tocá “Iniciar sesión” otra vez.")).catch((e) => showMsg(msgId, "err", errText(e)));
+      return;
+    }
+    loginBusy = true;
+    hideMsg(msgId);
+    Drive.requestToken()
+      .then(async () => {
+        account = await Drive.about();
+        renderAccount();
+        await refreshVaults();
+        if (current === "vaults" || current === "unlock" || current === "create") showView("vaults");
+        if (S) sync();
+      })
+      .catch((e) => { showMsg(msgId, "err", errText(e)); if (current === "vaults") showView("vaults"); })
+      .finally(() => { loginBusy = false; });
+  }
+  async function signOut() {
+    $("acctMenu").hidden = true;
+    if (S && hasUnsyncedChanges() && !confirm("Hay cambios en la bóveda abierta que todavía no se subieron a Drive. Si cerrás sesión ahora se pierden. ¿Cerrar sesión igual?")) return;
+    lockVault(null, true);
+    Drive.forget();
+    account = null; vaultIndex = null; trashIndex = [];
+    renderAccount(); renderNavVaults();
+    showView("vaults");
+    toast("Sesión cerrada. No quedó nada de tus bóvedas en este dispositivo.");
+  }
+  function onAuthLost(e) {
+    // El token venció (dura ~1 hora): se mantiene la cuenta visible pero hay que reconectar.
+    setSync("auth", e.message);
+  }
+
+  async function refreshVaults() {
+    if (!Drive.hasToken()) return;
+    try {
+      const [files, trashed] = await Promise.all([Drive.listVaults(false), Drive.listVaults(true)]);
+      vaultIndex = files.map((f) => ({ fileId: f.id, vaultId: f.appProperties.vaultId, name: f.appProperties.vaultName || f.name, modifiedTime: f.modifiedTime, version: f.version }));
+      const live = new Set(vaultIndex.map((v) => v.vaultId));
+      trashIndex = trashed.filter((f) => !live.has(f.appProperties.vaultId))
+        .map((f) => ({ fileId: f.id, vaultId: f.appProperties.vaultId, name: f.appProperties.vaultName || f.name, modifiedTime: f.modifiedTime }));
+      hideMsg("vaultsMsg");
+    } catch (e) {
+      if (e instanceof DriveAuthError) onAuthLost(e);
+      showMsg("vaultsMsg", "err", errText(e));
+    }
+    renderVaultList(); renderNavVaults();
+  }
+
+  function renderNavVaults() {
+    const box = $("navVaults");
+    box.textContent = "";
+    if (!account || !vaultIndex) return;
+    for (const v of vaultIndex) {
+      const open = S && S.vaultId === v.vaultId;
+      const b = el("button", { type: "button", class: "nv-sub", title: v.name, onclick: () => goVault(v.vaultId) },
+        el("span", { text: open ? "🔓" : "🔒" }), el("span", { text: v.name }));
+      if ((current === "vault" && open) || (current === "unlock" && selected && selected.vaultId === v.vaultId)) b.setAttribute("aria-current", "page");
+      box.append(b);
+    }
+  }
+  function renderVaultList() {
+    const list = $("vaultList");
+    list.textContent = "";
+    const rows = vaultIndex || [];
+    for (const v of rows) {
+      const open = S && S.vaultId === v.vaultId;
+      list.append(el("li", null, el("div", { class: "v-row" + (open ? " current" : "") },
+        el("span", { class: "v-ico", text: open ? "🔓" : "🗄️" }),
+        el("span", { class: "grow", onclick: () => goVault(v.vaultId) },
+          el("div", { class: "v-name", text: v.name }),
+          el("div", { class: "v-meta", text: (open ? "Abierta · " : "") + "Modificada: " + fmtDate(Date.parse(v.modifiedTime)) })),
+        el("button", { type: "button", class: "btn small", text: open ? "Ver" : "Abrir", onclick: () => goVault(v.vaultId) }),
+        el("button", { type: "button", class: "btn small danger", title: "Eliminar (solo si está vacía)", text: "🗑", onclick: () => deleteVault(v) }))));
+    }
+    $("vaultListEmpty").hidden = rows.length > 0;
+    $("vaultsCount").textContent = account ? account.email : "";
+    const tl = $("trashList"); tl.textContent = "";
+    for (const v of trashIndex) {
+      tl.append(el("li", null, el("div", { class: "v-row" },
+        el("span", { class: "v-ico", text: "🗑️" }),
+        el("span", { class: "grow" }, el("div", { class: "v-name", text: v.name }), el("div", { class: "v-meta", text: "En la papelera desde: " + fmtDate(Date.parse(v.modifiedTime)) })),
+        el("button", { type: "button", class: "btn small", text: "Restaurar", onclick: () => restoreVault(v) }))));
+    }
+    $("trashBox").hidden = trashIndex.length === 0;
+    renderLegacy();
+  }
+  function renderLegacy() {
+    const b = $("legacyBanner");
+    b.textContent = "";
+    if (!legacyVaults.length) { b.className = "msg"; return; }
+    b.className = "msg warn show";
+    b.append("La versión anterior dejó guardadas en este navegador " + legacyVaults.length + (legacyVaults.length === 1 ? " bóveda que quizás no esté" : " bóvedas que quizás no estén") +
+      " en Drive (" + legacyVaults.map((v) => v.name).join(", ") + "). Ahora no se guarda nada en el dispositivo. ",
+      el("button", { type: "button", class: "link", text: "Subirlas a mi Drive", onclick: uploadLegacy }), " · ",
+      el("button", { type: "button", class: "link", text: "Descargar copias", onclick: downloadLegacy }), " · ",
+      el("button", { type: "button", class: "link", text: "Borrarlas de este navegador", onclick: () => {
+        if (!confirm("¿Borrar de este navegador las bóvedas de la versión anterior? Si no las subiste a Drive ni descargaste copia, se pierden.")) return;
+        localStorage.removeItem(LEGACY_VAULTS); legacyVaults = []; renderLegacy();
+      } }));
+  }
+  function downloadEnv(env) {
+    const blob = new Blob([JSON.stringify(env)], { type: "application/octet-stream" });
+    const a = el("a", { href: URL.createObjectURL(blob), download: "cypher-" + env.name.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ ]+/g, "_").replace(/\s+/g, "-") + "-" + new Date().toISOString().slice(0, 10) + ".cypher" });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+  function downloadLegacy() { legacyVaults.forEach((v) => downloadEnv(v.env)); }
+  async function uploadLegacy() {
+    try {
+      let n = 0;
+      for (const v of legacyVaults) {
+        const env = parseEnvelope(v.env);
+        const ex = (vaultIndex || []).find((x) => x.vaultId === env.vaultId);
+        if (ex) {
+          showMsg("vaultsMsg", "warn", "“" + env.name + "” ya está en tu Drive. Descargá la copia, abrila y usá Opciones de la bóveda → “Combinar con una copia” para no perder cambios.");
+          continue;
+        }
+        await Drive.create(env); n++;
+      }
+      if (n) { localStorage.removeItem(LEGACY_VAULTS); legacyVaults = []; }
+      await refreshVaults();
+      if (n) showMsg("vaultsMsg", "ok", "Se subieron " + n + " bóvedas a tu Drive y se borraron de este navegador.");
+    } catch (e) { showMsg("vaultsMsg", "err", errText(e)); }
+  }
+
+  async function deleteVault(v) {
+    hideMsg("vaultsMsg"); hideMsg("vaultMsg");
+    const r = await askPassword({
+      title: "Eliminar “" + v.name + "”", okText: "Eliminar",
+      text: "Solo se puede eliminar una bóveda vacía. Ingresá su clave maestra para confirmar. Va a ir a la papelera de Google Drive, donde queda 30 días.",
+      verify: async (pw) => {
+        const env = parseEnvelope(await Drive.download(v.fileId));
+        const { data } = await unlockEnvelope(env, pw);
+        const n = data.entries.filter((e) => !e.deleted).length;
+        if (n > 0) throw new UserError("La bóveda tiene " + n + (n === 1 ? " entrada" : " entradas") + ". Para eliminarla, primero borralas una por una.");
+        if (S && S.vaultId === v.vaultId && live().length > 0) throw new UserError("La bóveda abierta tiene entradas sin subir. Esperá a que se guarde en Drive.");
+        await Drive.setTrashed(v.fileId, true);
+        return true;
+      },
+    });
+    if (!r) return;
+    if (S && S.vaultId === v.vaultId) lockVault(null, true);
+    await refreshVaults();
+    showView("vaults");
+    showMsg("vaultsMsg", "ok", "“" + v.name + "” se movió a la papelera de Google Drive. La podés restaurar desde acá durante 30 días.");
+  }
+  async function restoreVault(v) {
+    try {
+      await Drive.setTrashed(v.fileId, false);
+      await refreshVaults();
+      showMsg("vaultsMsg", "ok", "“" + v.name + "” restaurada.");
+    } catch (e) { showMsg("vaultsMsg", "err", errText(e)); }
+  }
+  async function importCopyAsVault(file) {
+    hideMsg("vaultsMsg");
+    try {
+      const env = parseEnvelope(await file.text());
+      if ((vaultIndex || []).some((v) => v.vaultId === env.vaultId)) {
+        showMsg("vaultsMsg", "warn", "“" + env.name + "” ya está en tu Drive. Abrila y usá Opciones de la bóveda → “Combinar con una copia” para traer los datos de este archivo.");
+        return;
+      }
+      await Drive.create(env);
+      await refreshVaults();
+      showMsg("vaultsMsg", "ok", "Copia subida a tu Drive como “" + env.name + "”. Se abre con la clave maestra que tenía.");
+    } catch (e) { showMsg("vaultsMsg", "err", errText(e)); }
+  }
+
+  // =====================================================================
+  // Bóveda abierta (solo en memoria)
+  // S = { vaultId, fileId, name, key, salt, iter, data, env, driveVersion, syncedHash, dirty }
+  // =====================================================================
   let S = null;
+  let selected = null; // bóveda elegida para abrir: { vaultId, fileId, name }
   let persistChain = Promise.resolve();
   const live = () => (S ? S.data.entries.filter((e) => !e.deleted) : []);
+  const hasUnsyncedChanges = () => !!(S && (S.dirty || syncing));
 
   function persist() {
     if (!S) return persistChain;
     const snap = S;
+    snap.dirty = true;
     persistChain = persistChain.then(async () => {
       if (S !== snap) return;
       snap.data.updatedAt = now();
-      const env = await sealVault({ vaultId: snap.vaultId, name: snap.name, salt: snap.salt, iter: snap.iter }, snap.data, snap.key);
-      if (S !== snap) return;
-      setEnv(snap.vaultId, env);
-      vaults[snap.vaultId].updatedAt = now();
-      saveVaults();
-    }).catch((e) => { console.error(e); toast("No se pudo guardar localmente: " + errText(e), 5000); });
-    scheduleSync();
+      snap.env = await sealVault({ vaultId: snap.vaultId, name: snap.name, salt: snap.salt, iter: snap.iter }, snap.data, snap.key);
+    }).catch((e) => { console.error(e); toast("No se pudo cifrar: " + errText(e), 5000); });
+    scheduleSync(600);
     return persistChain;
   }
 
-  // ---------- sincronización ----------
-  let syncing = false, syncAgain = false, syncTimer = null, syncState = "off", syncDetail = "";
+  // ---------- sincronización con Drive ----------
+  let syncing = false, syncAgain = false, syncTimer = null, syncState = "ok", syncDetail = "";
   function setSync(state, detail) {
     syncState = state; syncDetail = detail || "";
     const chip = $("syncChip");
     const map = {
-      off: ["💾 Solo en este dispositivo", ""], auth: ["☁️ Conectar Drive", "warn"], syncing: ["⟳ Sincronizando…", ""],
-      ok: ["✓ Guardado en Drive", "ok"], pending: ["● Cambios sin subir", "warn"], offline: ["⚠ Sin conexión", "warn"],
-      error: ["⚠ Error al sincronizar", "err"], paused: ["⚠ Sincronización en pausa", "warn"], noconfig: ["💾 Solo en este dispositivo", ""],
+      auth: ["⚠ Reconectar Google", "warn"], syncing: ["⟳ Guardando…", ""],
+      ok: ["✓ Guardado en Drive", "ok"], pending: ["● Cambios sin guardar", "warn"], offline: ["⚠ Sin internet: cambios sin guardar", "err"],
+      error: ["⚠ Error al guardar", "err"], paused: ["⚠ Guardado en pausa", "warn"],
     };
-    const [txt, cls] = map[state] || map.off;
+    const [txt, cls] = map[state] || map.ok;
     chip.textContent = txt; chip.className = "chip " + cls;
     chip.title = detail || txt;
-    renderDriveSettings();
+    chip.hidden = !S;
+    renderDriveInfo();
+    renderVaultBanner();
+  }
+  function renderDriveInfo() {
+    if (!S) return;
+    $("driveInfo").textContent = (account ? "Cuenta: " + account.email + ". " : "") +
+      (S.lastSyncAt ? "Último guardado en Drive: " + fmtDate(S.lastSyncAt) + "." : "") + (syncDetail && syncState !== "ok" ? "\n" + syncDetail : "");
+  }
+  function renderVaultBanner() {
+    const b = $("vaultBanner");
+    b.textContent = "";
+    if (!S || syncState === "ok" || syncState === "syncing" || syncState === "pending") { b.className = "msg"; return; }
+    b.className = "msg show " + (syncState === "auth" || syncState === "paused" ? "warn" : "err");
+    if (syncState === "offline") b.append("Sin conexión a internet. Los cambios quedan solo en memoria y se suben cuando vuelva la conexión: no cierres la app.");
+    else if (syncState === "auth") b.append("La sesión de Google venció. ", el("button", { type: "button", class: "link", text: "Reconectar", onclick: () => signIn("vaultMsg") }), " para seguir guardando.");
+    else b.append(syncDetail || "No se pudo guardar en Drive.", " ", el("button", { type: "button", class: "link", text: "Reintentar", onclick: () => sync() }));
   }
   function scheduleSync(delay = 1200) {
-    if (!S || !settings.driveLinked || !Drive.configured()) return;
+    if (!S) return;
     clearTimeout(syncTimer);
     if (syncState === "ok") setSync("pending");
     syncTimer = setTimeout(() => sync(), delay);
   }
   async function sync() {
     if (!S) return;
-    if (!Drive.configured()) { setSync("noconfig"); return; }
-    if (!settings.driveLinked) { setSync("off"); return; }
     if (syncing) { syncAgain = true; return; }
-    if (!Drive.hasToken()) { setSync("auth", "Tocá para conectar Google Drive y guardar los cambios."); return; }
-    if (!navigator.onLine) { setSync("offline", "Los cambios quedan guardados en este dispositivo y se suben cuando vuelva internet."); return; }
+    if (!navigator.onLine) { setSync("offline"); return; }
+    if (!Drive.hasToken()) { setSync("auth", "La sesión de Google venció. Volvé a iniciar sesión para guardar."); return; }
     const snap = S;
     syncing = true; setSync("syncing");
     try {
       await persistChain;
-      const rec = vaults[snap.vaultId];
-      let fileId = rec.driveFileId, meta = null;
-      if (fileId) {
-        try { meta = await Drive.getMeta(fileId); } catch (e) { if (e.status !== 404) throw e; }
-        if (meta && (meta.trashed || !meta.appProperties || meta.appProperties.vaultId !== snap.vaultId)) meta = null;
-      }
-      if (!meta) {
-        const found = (await Drive.listVaults()).find((f) => f.appProperties.vaultId === snap.vaultId);
-        if (found) { meta = found; fileId = found.id; } else fileId = null;
-        rec.driveFileId = fileId; saveVaults();
-        snap.driveVersion = null;
-      }
+      let meta = null;
+      try { meta = await Drive.getMeta(snap.fileId); } catch (e) { if (e.status !== 404) throw e; }
+      if (!meta || meta.trashed) throw new UserError(meta && meta.trashed
+        ? "El archivo de esta bóveda está en la papelera de Drive. Restauralo desde la lista de bóvedas para seguir guardando."
+        : "No encuentro el archivo de esta bóveda en tu Drive. Descargá una copia desde Opciones para no perder los cambios.");
       if (S !== snap) return;
 
-      // 1) Si el archivo de Drive cambió desde la última vez, bajarlo y combinarlo.
-      if (meta && meta.version !== snap.driveVersion) {
-        const env = parseEnvelope(await Drive.download(fileId));
+      // 1) Si el archivo cambió en Drive (otro dispositivo), se baja y se combina.
+      if (meta.version !== snap.driveVersion) {
+        const env = parseEnvelope(await Drive.download(snap.fileId));
         if (env.vaultId !== snap.vaultId) throw new UserError("El archivo de Drive no corresponde a esta bóveda.");
         let remote;
-        if (env.kdf.salt === snap.salt && env.kdf.iterations === snap.iter) {
-          remote = await openVault(env, snap.key);
-        } else {
-          // La clave maestra se cambió en otro dispositivo: hay que pedir la nueva.
+        if (env.kdf.salt === snap.salt && env.kdf.iterations === snap.iter) remote = await openVault(env, snap.key);
+        else {
           const r = await askPassword({
             title: "La clave maestra cambió",
-            text: "La bóveda “" + env.name + "” en Google Drive está cifrada con otra clave maestra (seguramente la cambiaste en otro dispositivo). Ingresá la clave actual para seguir sincronizando.",
+            text: "La bóveda “" + env.name + "” está cifrada con otra clave maestra (seguramente la cambiaste en otro dispositivo). Ingresá la clave actual para seguir.",
             verify: (pw) => unlockEnvelope(env, pw),
           });
           if (S !== snap) return;
-          if (!r) { setSync("paused", "No se ingresó la nueva clave maestra. Los cambios siguen guardados en este dispositivo."); return; }
+          if (!r) { setSync("paused", "No se ingresó la nueva clave maestra. Los cambios de esta sesión no se guardaron."); return; }
           snap.key = r.key; snap.salt = env.kdf.salt; snap.iter = env.kdf.iterations;
           remote = r.data;
-          toast("Clave maestra actualizada con la de Drive.");
         }
         if (S !== snap) return;
         const before = canon(snap.data.entries);
         snap.data.entries = mergeEntries(snap.data.entries, remote.entries);
-        if (env.name !== snap.name && snap.syncedHash == null) snap.name = env.name;
+        if (env.name !== snap.name && !snap.dirty) snap.name = env.name;
         snap.driveVersion = meta.version;
         snap.syncedHash = await stateHash(env.kdf.salt, env.kdf.iterations, env.name, remote.entries);
-        if (canon(snap.data.entries) !== before || !getEnv(snap.vaultId) || getEnv(snap.vaultId).kdf.salt !== snap.salt) {
-          await persistNow(snap);
-          renderEntries();
-        }
+        if (canon(snap.data.entries) !== before) renderEntries();
         refreshVaultLabels();
       }
-
       // 2) Subir si hay diferencias.
       const localHash = await stateHash(snap.salt, snap.iter, snap.name, snap.data.entries);
       if (S !== snap) return;
-      if (!fileId || localHash !== snap.syncedHash) {
-        await persistChain;
-        const env = getEnv(snap.vaultId);
-        const r = fileId ? await Drive.update(fileId, env) : await Drive.create(env);
-        rec.driveFileId = r.id; saveVaults();
+      if (localHash !== snap.syncedHash) {
+        snap.env = await sealVault({ vaultId: snap.vaultId, name: snap.name, salt: snap.salt, iter: snap.iter }, snap.data, snap.key);
+        const r = await Drive.update(snap.fileId, snap.env);
         snap.driveVersion = r.version; snap.syncedHash = localHash;
+        const idx = (vaultIndex || []).find((v) => v.vaultId === snap.vaultId);
+        if (idx) { idx.name = snap.name; idx.modifiedTime = r.modifiedTime || new Date().toISOString(); }
       }
       if (S !== snap) return;
-      rec.lastSyncAt = now(); saveVaults();
-      setSync("ok", "Última sincronización: " + fmtDate(rec.lastSyncAt));
+      snap.dirty = false;
+      snap.lastSyncAt = now();
+      setSync("ok", "Último guardado: " + fmtDate(snap.lastSyncAt));
     } catch (e) {
       console.warn("sync", e);
-      if (e instanceof DriveAuthError) setSync("auth", e.message);
-      else setSync(navigator.onLine ? "error" : "offline", errText(e));
+      if (e instanceof DriveAuthError) onAuthLost(e);
+      else if (e instanceof OfflineError || !navigator.onLine) setSync("offline");
+      else setSync("error", errText(e));
     } finally {
       syncing = false;
       if (syncAgain && S) { syncAgain = false; scheduleSync(300); }
     }
   }
-  async function persistNow(snap) {
-    snap.data.updatedAt = now();
-    const env = await sealVault({ vaultId: snap.vaultId, name: snap.name, salt: snap.salt, iter: snap.iter }, snap.data, snap.key);
-    setEnv(snap.vaultId, env);
-  }
-  // Conectar Drive desde un clic, y sincronizar.
-  function connectAndSync() {
-    if (!Drive.configured()) { toast("Google Drive todavía no está configurado en esta app."); return; }
-    if (!Drive.ready()) { Drive.load().then(() => toast("Listo. Tocá de nuevo para conectar.")).catch((e) => toast(errText(e))); return; }
-    Drive.requestToken().then(() => sync()).catch((e) => { setSync("auth", errText(e)); toast(errText(e), 4000); });
-  }
 
-  // =====================================================================
-  // Pantalla de inicio: lista de bóvedas
-  // =====================================================================
-  let selectedVault = null; // { id, fromDrive }
-  function homePanel(which) {
-    $("homeList").hidden = which !== "list";
-    $("unlockForm").hidden = which !== "unlock";
-    $("createForm").hidden = which !== "create";
-    if (which === "unlock") setTimeout(() => $("unlockPw").focus(), 30);
-    if (which === "create") setTimeout(() => $("createName").focus(), 30);
-  }
-  function allVaultRows() {
-    const rows = new Map();
-    for (const v of Object.values(vaults)) rows.set(v.id, { id: v.id, name: v.name, local: !!getEnv(v.id), drive: !!v.driveFileId, updatedAt: v.updatedAt || 0 });
-    for (const [id, d] of Object.entries(driveSeen)) {
-      const r = rows.get(id) || { id, name: d.name, local: false, drive: true, updatedAt: Date.parse(d.modifiedTime) || 0 };
-      r.drive = true; rows.set(id, r);
+  // ---------- abrir / crear / cerrar ----------
+  function goVault(vaultId) {
+    if (S && S.vaultId === vaultId) { showView("vault"); return; }
+    const v = (vaultIndex || []).find((x) => x.vaultId === vaultId);
+    if (!v) return;
+    if (S) {
+      if (hasUnsyncedChanges() && !confirm("La bóveda “" + S.name + "” tiene cambios que todavía no se subieron a Drive. Si la cerrás ahora se pierden. ¿Cerrarla igual?")) return;
+      lockVault(null, true);
     }
-    return [...rows.values()].filter((r) => r.local || driveSeen[r.id])
-      .sort((a, b) => (a.id === settings.lastVaultId ? -1 : b.id === settings.lastVaultId ? 1 : a.name.localeCompare(b.name, "es")));
-  }
-  function renderHome() {
-    const list = $("vaultList");
-    list.textContent = "";
-    const rows = allVaultRows();
-    for (const r of rows) {
-      const where = r.local && r.drive ? "En este dispositivo y en Drive" : r.local ? "Solo en este dispositivo" : "En Google Drive";
-      list.append(el("li", null, el("button", { type: "button", onclick: () => selectVault(r.id) },
-        el("span", { class: "v-ico", text: "🗄️" }),
-        el("span", { class: "grow" }, el("div", { class: "v-name", text: r.name }), el("div", { class: "v-meta", text: where })),
-        el("span", { class: "small", text: "Abrir ›" }))));
-    }
-    $("vaultListEmpty").hidden = rows.length > 0;
-    const drv = $("homeDrive");
-    drv.hidden = !Drive.configured();
-    $("homeDriveState").textContent = !Drive.configured() ? "" : Drive.hasToken() ? "Drive conectado" : "";
-  }
-  function selectVault(id) {
-    const rec = vaults[id];
-    selectedVault = { id, name: (rec && rec.name) || (driveSeen[id] && driveSeen[id].name) || "Bóveda" };
-    $("unlockTitle").textContent = "Abrir “" + selectedVault.name + "”";
-    $("unlockWhere").textContent = getEnv(id) ? "" : "Se va a descargar de tu Google Drive.";
+    selected = { vaultId: v.vaultId, fileId: v.fileId, name: v.name };
+    $("unlockTitle").textContent = "Abrir “" + v.name + "”";
     $("unlockPw").value = ""; hideMsg("unlockMsg");
-    homePanel("unlock");
+    showView("unlock");
+    setTimeout(() => $("unlockPw").focus(), 30);
   }
-  async function homeFindInDrive() {
-    hideMsg("homeMsg");
-    if (!Drive.ready()) {
-      showMsg("homeMsg", "info", "Cargando Google…");
-      try { await Drive.load(); showMsg("homeMsg", "info", "Listo. Tocá “Buscar en Google Drive” otra vez."); } catch (e) { showMsg("homeMsg", "err", errText(e)); }
-      return;
-    }
-    const tokenP = Drive.hasToken() ? Promise.resolve() : Drive.requestToken();
-    try {
-      await tokenP;
-      showMsg("homeMsg", "info", "Buscando bóvedas en tu Drive…");
-      const files = await Drive.listVaults();
-      for (const f of files) {
-        const id = f.appProperties.vaultId;
-        if (!driveSeen[id]) driveSeen[id] = { fileId: f.id, name: f.appProperties.vaultName || f.name, modifiedTime: f.modifiedTime };
-        if (vaults[id] && !vaults[id].driveFileId) { vaults[id].driveFileId = f.id; saveVaults(); }
-      }
-      renderHome();
-      showMsg("homeMsg", files.length ? "ok" : "info", files.length ? "Encontré " + files.length + (files.length === 1 ? " bóveda" : " bóvedas") + " en tu Drive."
-        : "No hay bóvedas de Cypher en tu Drive todavía. Las que crees se van a guardar ahí automáticamente.");
-    } catch (e) { showMsg("homeMsg", "err", errText(e)); }
-  }
-
   async function doUnlock(ev) {
     ev.preventDefault();
-    if (!selectedVault) return;
-    const id = selectedVault.id, pw = $("unlockPw").value;
+    if (!selected) return;
+    const pw = $("unlockPw").value;
     hideMsg("unlockMsg");
     if (!pw) { showMsg("unlockMsg", "err", "Ingresá la clave maestra."); return; }
-    // Pedir el permiso de Drive ya, mientras el clic todavía cuenta (si no, se bloquea la ventana de Google).
-    let tokenP = null;
-    if (settings.driveLinked && Drive.ready() && !Drive.hasToken() && navigator.onLine) tokenP = Drive.requestToken().catch((e) => e);
     const btn = $("unlockBtn"); btn.disabled = true; btn.textContent = "Abriendo…";
     try {
-      let env = getEnv(id);
-      if (!env) {
-        const d = driveSeen[id];
-        if (!d) throw new UserError("No encuentro esta bóveda.");
-        if (tokenP) { const r = await tokenP; tokenP = null; if (r instanceof Error) throw r; }
-        env = parseEnvelope(await Drive.download(d.fileId));
-        if (env.vaultId !== id) throw new UserError("El archivo de Drive no corresponde a esta bóveda.");
-        vaults[id] = vaults[id] || { id, name: env.name };
-        vaults[id].driveFileId = d.fileId;
-        setEnv(id, env);
-      }
+      const meta = await Drive.getMeta(selected.fileId);
+      const env = parseEnvelope(await Drive.download(selected.fileId));
+      if (env.vaultId !== selected.vaultId) throw new UserError("El archivo de Drive no corresponde a esta bóveda.");
       const { key, data } = await unlockEnvelope(env, pw);
       $("unlockPw").value = "";
-      startSession({ vaultId: id, name: env.name, key, salt: env.kdf.salt, iter: env.kdf.iterations, data });
-      if (tokenP) { const r = await tokenP; if (r instanceof Error) setSync("auth", errText(r)); }
-      sync();
+      startSession({ vaultId: env.vaultId, fileId: selected.fileId, name: env.name, key, salt: env.kdf.salt, iter: env.kdf.iterations, data, env,
+        driveVersion: meta.version, syncedHash: await stateHash(env.kdf.salt, env.kdf.iterations, env.name, data.entries) });
     } catch (e) {
+      if (e instanceof DriveAuthError) onAuthLost(e);
       showMsg("unlockMsg", "err", e instanceof WrongKeyError ? "Clave maestra incorrecta." : errText(e));
       $("unlockPw").select();
     } finally { btn.disabled = false; btn.textContent = "Abrir"; }
   }
-
   async function doCreate(ev) {
     ev.preventDefault();
     hideMsg("createMsg");
     const name = $("createName").value.trim(), pw = $("createPw").value, pw2 = $("createPw2").value;
     try {
+      if (!Drive.hasToken()) throw new UserError("Iniciá sesión con Google para crear una bóveda.");
       if (!name) throw new UserError("Poné un nombre para la bóveda.");
       if (pw.length < 8) throw new UserError("La clave maestra tiene que tener al menos 8 caracteres (mejor 16 o más).");
       if (pw !== pw2) throw new UserError("Las claves no coinciden.");
       if (strength(pw).bits < 50 && !confirm("La clave maestra es débil. Si alguien consigue el archivo cifrado podría adivinarla. ¿Crear igual?")) return;
-      let tokenP = null;
-      if (settings.driveLinked && Drive.ready() && !Drive.hasToken() && navigator.onLine) tokenP = Drive.requestToken().catch((e) => e);
       const btn = $("createBtn"); btn.disabled = true; btn.textContent = "Creando…";
       try {
         const vaultId = uuid(), salt = b64urlEncode(rand(16)), iter = VAULT_ITER;
         const key = await deriveVaultKey(pw, salt, iter);
         const data = { entries: [], createdAt: now() };
-        // Verificación: se cifra y se vuelve a abrir antes de dar por creada la bóveda.
         const env = await sealVault({ vaultId, name, salt, iter }, data, key);
-        await unlockEnvelope(env, pw);
-        vaults[vaultId] = { id: vaultId, name, driveFileId: null, lastExportAt: null, updatedAt: now() };
-        setEnv(vaultId, env);
+        await unlockEnvelope(env, pw); // verificación antes de subir
+        const r = await Drive.create(env);
         ["createName", "createPw", "createPw2"].forEach((i) => ($(i).value = ""));
-        startSession({ vaultId, name, key, salt, iter, data });
-        if (tokenP) { const r = await tokenP; if (r instanceof Error) setSync("auth", errText(r)); }
-        sync();
-        toast("Bóveda “" + name + "” creada.");
+        await refreshVaults();
+        startSession({ vaultId, fileId: r.id, name, key, salt, iter, data, env, driveVersion: r.version,
+          syncedHash: await stateHash(salt, iter, name, data.entries) });
+        S.lastSyncAt = now(); setSync("ok");
+        toast("Bóveda “" + name + "” creada en tu Drive.");
       } finally { btn.disabled = false; btn.textContent = "Crear bóveda"; }
-    } catch (e) { showMsg("createMsg", "err", errText(e)); }
+    } catch (e) {
+      if (e instanceof DriveAuthError) onAuthLost(e);
+      showMsg("createMsg", "err", errText(e));
+    }
   }
-
-  async function importVaultFileHome(file) {
-    hideMsg("homeMsg");
-    try {
-      const env = parseEnvelope(await file.text());
-      if (getEnv(env.vaultId)) {
-        showMsg("homeMsg", "warn", "La bóveda “" + env.name + "” ya está en este dispositivo. Abrila y usá Ajustes → “Combinar con una copia” para traer los datos de este archivo.");
-        return;
-      }
-      vaults[env.vaultId] = { id: env.vaultId, name: env.name, driveFileId: null, lastExportAt: now(), updatedAt: now() };
-      setEnv(env.vaultId, env);
-      renderHome();
-      selectVault(env.vaultId);
-      toast("Archivo cargado. Ingresá su clave maestra.");
-    } catch (e) { showMsg("homeMsg", "err", errText(e)); }
-  }
-
-  // =====================================================================
-  // Abrir / cerrar sesión
-  // =====================================================================
-  let toolsOnly = false;
   function startSession(s) {
-    S = Object.assign({ driveVersion: null, syncedHash: null }, s);
-    toolsOnly = false;
-    settings.lastVaultId = s.vaultId; saveSettings();
-    vaults[s.vaultId].lastOpenedAt = now(); saveVaults();
-    $("home").hidden = true; $("app").hidden = false;
-    document.querySelectorAll("[data-needs-vault]").forEach((n) => (n.hidden = false));
-    $("addEntry").hidden = false;
-    refreshVaultLabels();
+    S = Object.assign({ dirty: false, lastSyncAt: now() }, s);
+    selected = null;
     $("search").value = "";
-    setSync(!Drive.configured() ? "noconfig" : settings.driveLinked ? (Drive.hasToken() ? "syncing" : "auth") : "off");
+    vaultTab("entries");
+    refreshVaultLabels();
+    setSync("ok");
     showView("vault");
     renderEntries();
-    renderBackup();
+    renderVaultList();
     touch();
-  }
-  function openToolsOnly() {
-    S = null; toolsOnly = true;
-    $("home").hidden = true; $("app").hidden = false;
-    document.querySelectorAll("[data-needs-vault]").forEach((n) => (n.hidden = true));
-    $("tbVault").textContent = "Cypher · herramientas";
-    $("syncChip").hidden = true;
-    $("lockBtn").innerHTML = "";
-    $("lockBtn").append("← ", el("span", { class: "hide-sm", text: "Bóvedas" }));
-    showView("gen");
   }
   function refreshVaultLabels() {
     if (!S) return;
-    $("tbVault").textContent = S.name;
+    $("vaultTitle").textContent = "🔓 " + S.name;
     $("renameInput").value = S.name;
-    $("syncChip").hidden = false;
-    $("lockBtn").innerHTML = "";
-    $("lockBtn").append("🔒 ", el("span", { class: "hide-sm", text: "Bloquear" }));
+    if (current === "vault") $("tbTitle").textContent = S.name;
+    renderNavVaults();
   }
-  async function lock(reason) {
-    if (S) { try { await persistChain; } catch { /* ya avisado */ } }
-    const lastId = S ? S.vaultId : null;
-    S = null; toolsOnly = false;
+  // Cierra la bóveda abierta y borra de memoria todo lo descifrado.
+  function lockVault(reason, silent) {
+    if (!S) return;
+    const name = S.name, vaultId = S.vaultId;
+    if (S.key) S.key = null;
+    if (S.data) S.data.entries = [];
+    S = null;
     clearTimeout(syncTimer);
     document.querySelectorAll("dialog[open]").forEach((d) => d.close());
     $("entryList").textContent = "";
-    ["search", "fTitle", "fUrl", "fUser", "fPass", "fNotes", "ioText", "ioPw", "pw", "pw2", "input", "output", "genOut", "unlockPw"].forEach((i) => ($(i).value = ""));
+    ["search", "fTitle", "fUrl", "fUser", "fPass", "fNotes", "ioText", "ioPw", "renameInput"].forEach((i) => ($(i).value = ""));
     $("ioNotes").textContent = "";
     ioResults = [];
-    setOutputSecret(false); hideMsg("msg"); hideMsg("genMsg");
-    $("app").hidden = true; $("home").hidden = false;
-    renderHome();
-    hideMsg("homeMsg");
-    if (lastId && (getEnv(lastId) || driveSeen[lastId])) {
-      selectVault(lastId);
-      if (reason) showMsg("unlockMsg", "info", reason);
-    } else {
-      homePanel("list");
-      if (reason) showMsg("homeMsg", "info", reason);
+    $("syncChip").hidden = true;
+    renderNavVaults(); renderVaultList();
+    if (!silent) {
+      const v = (vaultIndex || []).find((x) => x.vaultId === vaultId);
+      if (v) { goVault(vaultId); if (reason) showMsg("unlockMsg", "info", reason); }
+      else showView("vaults");
+      if (!v && reason) toast(reason, 4000);
     }
+    void name;
   }
 
   // Bloqueo automático por inactividad.
@@ -824,24 +937,50 @@
   function touch() { lastActivity = now(); }
   ["pointerdown", "keydown", "input", "scroll"].forEach((t) => window.addEventListener(t, touch, { passive: true, capture: true }));
   function checkIdle() {
-    if (S && now() - lastActivity > settings.autoLockMin * 60000) lock("La bóveda se bloqueó sola por inactividad.");
+    if (S && now() - lastActivity > prefs.autoLockMin * 60000) {
+      if (hasUnsyncedChanges() && navigator.onLine && Drive.hasToken()) { sync(); return; } // primero intenta guardar
+      lockVault("La bóveda se cerró sola por inactividad.");
+    }
   }
   setInterval(checkIdle, 10000);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) { checkIdle(); if (S && Drive.hasToken() && syncState !== "syncing") sync(); }
   });
-  window.addEventListener("online", () => { if (S) sync(); });
-  window.addEventListener("offline", () => { if (S && settings.driveLinked) setSync("offline", "Los cambios quedan guardados en este dispositivo."); });
+  window.addEventListener("online", () => { if (S) sync(); if (current === "vaults") showView("vaults"); });
+  window.addEventListener("offline", () => { if (S && S.dirty) setSync("offline"); if (current === "vaults") showView("vaults"); });
+  window.addEventListener("beforeunload", (e) => { if (hasUnsyncedChanges()) { e.preventDefault(); e.returnValue = ""; } });
+  window.addEventListener("pagehide", () => { if (S) { S.key = null; S.data.entries = []; } });
 
   // =====================================================================
   // Vistas
   // =====================================================================
+  let current = "vaults";
+  const TITLES = { vaults: "Bóvedas", unlock: "Abrir bóveda", create: "Nueva bóveda", gen: "Generar contraseña", text: "Cifrar texto", settings: "Ajustes" };
   function showView(v) {
-    for (const n of ["vault", "gen", "text", "settings"]) $("view-" + n).hidden = n !== v;
-    document.querySelectorAll(".nv").forEach((b) => b.setAttribute("aria-current", b.dataset.view === v ? "page" : "false"));
-    $("nav").querySelector('[data-view="vault"]').hidden = toolsOnly;
-    if (v === "vault" && toolsOnly) return showView("gen");
+    if (v === "vault" && !S) v = "vaults";
+    current = v;
+    for (const n of ["vaults", "unlock", "create", "vault", "gen", "text", "settings"]) $("view-" + n).hidden = n !== v;
+    const navKey = v === "unlock" || v === "create" || v === "vault" ? "vaults" : v;
+    document.querySelectorAll(".nv").forEach((b) => b.setAttribute("aria-current", b.dataset.view === navKey && !(v === "vault" || v === "unlock") ? "page" : "false"));
+    // En celular el botón “Bóvedas” queda marcado también dentro de una bóveda.
+    if (window.matchMedia("(max-width: 899px)").matches) document.querySelectorAll(".nv").forEach((b) => { if (b.dataset.view === navKey) b.setAttribute("aria-current", "page"); });
+    $("tbTitle").textContent = v === "vault" && S ? S.name : TITLES[v] || "Cypher";
+    if (v === "vaults") {
+      const offline = !navigator.onLine;
+      $("vaultsOffline").hidden = !offline;
+      $("vaultsLogin").hidden = offline || !!account;
+      $("vaultsList").hidden = offline || !account;
+      if (!offline && account && vaultIndex) renderVaultList();
+    }
+    renderNavVaults();
     window.scrollTo(0, 0);
+  }
+  function vaultTab(t) {
+    $("tabEntries").setAttribute("aria-selected", t === "entries");
+    $("tabVaultOpts").setAttribute("aria-selected", t !== "entries");
+    $("paneEntries").hidden = t !== "entries";
+    $("paneVaultOpts").hidden = t === "entries";
+    if (t !== "entries") renderDriveInfo();
   }
 
   // ---------- lista de entradas ----------
@@ -858,13 +997,12 @@
     for (const e of items) {
       const title = e.title || hostOf(e.url) || "(sin nombre)";
       const sub = e.username || hostOf(e.url) || "";
-      const li = el("li", { class: "entry", onclick: () => openEntry(e.id) },
+      list.append(el("li", { class: "entry", onclick: () => openEntry(e.id) },
         el("div", { class: "avatar", style: { background: colorFor(title) }, text: [...title][0] || "?" }),
         el("div", { class: "e-main" }, el("div", { class: "e-title", text: title }), el("div", { class: "e-sub", text: sub })),
         el("div", { class: "e-act" },
           e.username ? el("button", { type: "button", title: "Copiar usuario", text: "👤", onclick: (ev) => { ev.stopPropagation(); copyText(e.username, false); } }) : null,
-          e.password ? el("button", { type: "button", title: "Copiar contraseña", text: "🔑", onclick: (ev) => { ev.stopPropagation(); copyText(e.password, true); } }) : null));
-      list.append(li);
+          e.password ? el("button", { type: "button", title: "Copiar contraseña", text: "🔑", onclick: (ev) => { ev.stopPropagation(); copyText(e.password, true); } }) : null)));
     }
     const empty = $("entryEmpty");
     empty.hidden = items.length > 0;
@@ -872,31 +1010,12 @@
     empty.lastElementChild.hidden = all.length > 0;
   }
 
-  // ---------- recordatorio de copia offline ----------
-  function renderBackup() {
-    if (!S) return;
-    const rec = vaults[S.vaultId];
-    $("lastExport").textContent = "Última copia descargada: " + fmtDate(rec.lastExportAt) + ".";
-    const due = live().length > 0 && (!rec.lastExportAt || now() - rec.lastExportAt > 30 * 86400000);
-    const b = $("backupBanner");
-    b.textContent = "";
-    if (due && !S.backupDismissed) {
-      b.className = "msg warn show";
-      b.append(rec.lastExportAt ? "Hace más de 30 días que no descargás una copia offline de esta bóveda. " : "Todavía no descargaste una copia offline de esta bóveda. ",
-        el("button", { type: "button", class: "link", text: "Descargar ahora", onclick: exportVault }), " · ",
-        el("button", { type: "button", class: "link", text: "Más tarde", onclick: () => { S.backupDismissed = true; renderBackup(); } }));
-    } else b.className = "msg";
-  }
+  // ---------- respaldo manual ----------
   async function exportVault() {
     if (!S) return;
     await persistChain;
-    const env = getEnv(S.vaultId);
-    const blob = new Blob([JSON.stringify(env)], { type: "application/octet-stream" });
-    const a = el("a", { href: URL.createObjectURL(blob), download: "cypher-" + S.name.replace(/[^\w\-áéíóúñÁÉÍÓÚÑ ]+/g, "_").replace(/\s+/g, "-") + "-" + new Date().toISOString().slice(0, 10) + ".cypher" });
-    document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    vaults[S.vaultId].lastExportAt = now(); saveVaults();
-    renderBackup();
+    S.env = await sealVault({ vaultId: S.vaultId, name: S.name, salt: S.salt, iter: S.iter }, S.data, S.key);
+    downloadEnv(S.env);
     toast("Copia cifrada descargada. Guardala fuera de Google.", 3500);
   }
   async function mergeVaultFile(file) {
@@ -939,6 +1058,7 @@
     const p = $("fPass").value;
     $("fPassStrength").textContent = p ? "· " + strength(p).label : "";
   }
+  function clearEntryForm() { ["fTitle", "fUrl", "fUser", "fPass", "fNotes"].forEach((i) => ($(i).value = "")); }
   async function saveEntry(ev) {
     ev.preventDefault();
     if (!S) return;
@@ -951,25 +1071,24 @@
     } else {
       S.data.entries.push(normEntry(Object.assign({ id: uuid(), createdAt: t, updatedAt: t }, vals)));
     }
-    $("entryDialog").close();
-    renderEntries(); renderBackup();
+    $("entryDialog").close(); clearEntryForm();
+    renderEntries();
     await persist();
-    toast("Guardado.");
   }
   async function deleteEntry() {
     if (!S || !editingId) return;
     const e = S.data.entries.find((x) => x.id === editingId);
-    if (!confirm("¿Eliminar “" + (e.title || "esta entrada") + "”? Si te arrepentís, podés recuperarla de una copia o de las versiones anteriores en Drive.")) return;
+    if (!confirm("¿Eliminar “" + (e.title || "esta entrada") + "”? Si te arrepentís, podés recuperarla de una copia o de las versiones anteriores del archivo en Drive.")) return;
     const i = S.data.entries.findIndex((x) => x.id === editingId);
     S.data.entries[i] = { id: editingId, deleted: true, updatedAt: now() };
-    $("entryDialog").close();
+    $("entryDialog").close(); clearEntryForm();
     renderEntries();
     await persist();
     toast("Entrada eliminada.");
   }
 
   // ---------- diálogo genérico para pedir una clave ----------
-  // verify(pw) -> resultado; si lanza WrongKeyError se vuelve a pedir. Devuelve null si se cancela.
+  // verify(pw) -> resultado; si lanza un error se muestra y se vuelve a pedir. Devuelve null si se cancela.
   function askPassword({ title, text, verify, confirmField, okText }) {
     return new Promise((resolve) => {
       const d = $("promptDialog");
@@ -982,6 +1101,7 @@
       mk("promptPw", confirmField ? "Clave maestra actual" : "Clave maestra");
       if (confirmField) { mk("promptNew", "Nueva clave maestra"); mk("promptNew2", "Repetir nueva clave maestra"); }
       $("promptOk").textContent = okText || "Aceptar";
+      $("promptOk").className = "btn " + (okText === "Eliminar" ? "danger" : "primary");
       hideMsg("promptMsg");
       let busy = false;
       const finish = (v) => { cleanup(); d.close(); resolve(v); };
@@ -996,12 +1116,9 @@
           if (n1 !== n2) { showMsg("promptMsg", "err", "Las claves nuevas no coinciden."); return; }
         }
         busy = true; $("promptOk").disabled = true;
-        try {
-          const r = await verify(pw, confirmField ? $("promptNew").value : undefined);
-          finish(r);
-        } catch (e) {
-          showMsg("promptMsg", "err", e instanceof WrongKeyError ? "Clave incorrecta." : errText(e));
-        } finally { busy = false; $("promptOk").disabled = false; }
+        try { finish(await verify(pw, confirmField ? $("promptNew").value : undefined)); }
+        catch (e) { showMsg("promptMsg", "err", e instanceof WrongKeyError ? "Clave incorrecta." : errText(e)); }
+        finally { busy = false; $("promptOk").disabled = false; }
       };
       const onCancel = (ev) => { if (ev) ev.preventDefault(); finish(null); };
       const cleanup = () => {
@@ -1018,16 +1135,17 @@
     });
   }
 
-  // ---------- ajustes de bóveda ----------
+  // ---------- opciones de la bóveda ----------
   async function changeMasterPassword() {
     if (!S) return;
     const snap = S;
     const r = await askPassword({
       title: "Cambiar clave maestra", okText: "Cambiar", confirmField: true,
-      text: "En tus otros dispositivos te la va a pedir la próxima vez que sincronicen. Las copias descargadas antes siguen abriéndose con la clave vieja.",
+      text: "En tus otros dispositivos te la va a pedir la próxima vez que abran esta bóveda. Las copias descargadas antes siguen abriéndose con la clave vieja.",
       verify: async (oldPw, newPw) => {
-        const env = getEnv(snap.vaultId);
-        await unlockEnvelope(env, oldPw); // verifica la clave actual
+        await persistChain;
+        const check = await sealVault({ vaultId: snap.vaultId, name: snap.name, salt: snap.salt, iter: snap.iter }, { entries: [] }, snap.key);
+        try { await unlockEnvelope(check, oldPw); } catch { throw new WrongKeyError("Clave incorrecta."); }
         const salt = b64urlEncode(rand(16)), iter = VAULT_ITER;
         const key = await deriveVaultKey(newPw, salt, iter);
         const test = await sealVault({ vaultId: snap.vaultId, name: snap.name, salt, iter }, snap.data, key);
@@ -1038,53 +1156,18 @@
     if (!r || S !== snap) return;
     S.key = r.key; S.salt = r.salt; S.iter = r.iter;
     await persist();
-    showMsg("vaultMsg", "ok", "Clave maestra cambiada." + (settings.driveLinked ? " Se va a subir a Drive." : "") + " Te conviene descargar una copia nueva.");
+    showMsg("vaultMsg", "ok", "Clave maestra cambiada. Te conviene descargar una copia nueva.");
   }
   async function renameVault() {
     if (!S) return;
     const n = $("renameInput").value.trim();
     if (!n) { showMsg("vaultMsg", "err", "El nombre no puede quedar vacío."); return; }
-    S.name = n; vaults[S.vaultId].name = n;
+    S.name = n;
+    const idx = (vaultIndex || []).find((v) => v.vaultId === S.vaultId);
+    if (idx) idx.name = n;
     refreshVaultLabels();
     await persist();
     showMsg("vaultMsg", "ok", "Nombre cambiado.");
-  }
-  async function forgetVault() {
-    if (!S) return;
-    const rec = vaults[S.vaultId];
-    const safe = rec.driveFileId && syncState === "ok";
-    const msg = safe
-      ? "Se va a quitar “" + S.name + "” de este dispositivo. Sigue estando en tu Google Drive y la podés volver a abrir desde ahí. ¿Continuar?"
-      : "ATENCIÓN: “" + S.name + "” no está sincronizada con Google Drive. Si la quitás y no tenés una copia descargada, la vas a perder. ¿Quitar igual de este dispositivo?";
-    if (!confirm(msg)) return;
-    const id = S.vaultId;
-    await lock();
-    delete vaults[id]; delete memEnv[id];
-    if (settings.lastVaultId === id) settings.lastVaultId = null;
-    saveVaults(); saveSettings();
-    renderHome();
-    showMsg("homeMsg", "ok", "Bóveda quitada de este dispositivo.");
-  }
-  function renderDriveSettings() {
-    const info = $("driveInfo");
-    if (!info) return;
-    const conn = $("driveConnect"), syncBtn = $("driveSyncNow"), disc = $("driveDisconnect");
-    if (!Drive.configured()) {
-      info.textContent = "Google Drive todavía no está configurado en esta copia de la app. Mientras tanto, la bóveda se guarda solo en este dispositivo: descargá copias seguido.";
-      conn.hidden = syncBtn.hidden = disc.hidden = true;
-      return;
-    }
-    const rec = S && vaults[S.vaultId];
-    const linked = settings.driveLinked;
-    conn.hidden = linked && Drive.hasToken();
-    conn.textContent = linked ? "Reconectar Google Drive" : "Conectar Google Drive";
-    syncBtn.hidden = !linked || !Drive.hasToken();
-    disc.hidden = !linked;
-    info.textContent = !linked
-      ? "Conectá tu Google Drive para que cada bóveda se guarde ahí automáticamente (cifrada) y la tengas en todos tus dispositivos. La app solo puede ver los archivos que ella misma crea."
-      : (Drive.hasToken() ? "Conectado. " : "Vinculado, pero hay que reconectar en esta sesión. ") +
-        (rec && rec.driveFileId ? "Esta bóveda está en tu Drive. " : "Esta bóveda todavía no se subió. ") +
-        (rec && rec.lastSyncAt ? "Última sincronización: " + fmtDate(rec.lastSyncAt) + "." : "") + (syncDetail && syncState !== "ok" ? "\n" + syncDetail : "");
   }
 
   // =====================================================================
@@ -1445,20 +1528,40 @@
     const b = document.querySelector('[data-toggle="' + id + '"]');
     if (b) b.textContent = show ? "Ocultar" : "Mostrar";
   }
+  const METER_HINT = "Usá una frase larga: 4–6 palabras al azar o 16+ caracteres.";
   document.querySelectorAll("[data-toggle]").forEach((b) => b.addEventListener("click", () => setPwVisible(b.dataset.toggle, $(b.dataset.toggle).type === "password")));
-  document.querySelectorAll("[data-home-back]").forEach((b) => b.addEventListener("click", () => { homePanel("list"); renderHome(); }));
-  document.querySelectorAll("dialog [data-close]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));
-  document.querySelectorAll(".nv").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+  document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => showView(b.dataset.go)));
+  document.querySelectorAll("dialog [data-close]").forEach((b) => b.addEventListener("click", () => { b.closest("dialog").close(); if (b.closest("#entryDialog")) clearEntryForm(); }));
+  document.querySelectorAll(".nv").forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.view === "vaults" && S && window.matchMedia("(max-width: 899px)").matches && current !== "vault") { showView("vault"); return; }
+    showView(b.dataset.view);
+  }));
 
-  // Inicio
-  $("homeCreate").onclick = () => { hideMsg("createMsg"); paintMeter("createMeterBar", "createMeterText", "", "Usá una frase larga: 4–6 palabras al azar o 16+ caracteres."); homePanel("create"); };
-  $("homeDrive").onclick = homeFindInDrive;
-  $("homeImport").onclick = () => $("fileImportHome").click();
-  $("fileImportHome").onchange = (ev) => { const f = ev.target.files[0]; ev.target.value = ""; if (f) importVaultFileHome(f); };
-  $("homeTools").onclick = openToolsOnly;
+  // Cuenta
+  $("signInTop").onclick = () => { showView("vaults"); signIn("loginMsg"); };
+  $("signInMain").onclick = () => signIn("loginMsg");
+  $("acctBtn").onclick = (e) => {
+    e.stopPropagation();
+    const m = $("acctMenu"); m.hidden = !m.hidden;
+    $("acctBtn").setAttribute("aria-expanded", String(!m.hidden));
+  };
+  document.addEventListener("click", (e) => { if (!$("acctMenu").hidden && !$("accountBox").contains(e.target)) $("acctMenu").hidden = true; });
+  $("signOutBtn").onclick = signOut;
+
+  // Bóvedas
+  $("createOpen").onclick = () => {
+    hideMsg("createMsg");
+    paintMeter("createMeterBar", "createMeterText", "", METER_HINT);
+    if (S) { if (hasUnsyncedChanges() && !confirm("La bóveda abierta tiene cambios sin subir. ¿Cerrarla igual?")) return; lockVault(null, true); }
+    showView("create");
+    setTimeout(() => $("createName").focus(), 30);
+  };
+  $("refreshVaults").onclick = () => refreshVaults();
+  $("importCopyBtn").onclick = () => $("fileImportCopy").click();
+  $("fileImportCopy").onchange = (ev) => { const f = ev.target.files[0]; ev.target.value = ""; if (f) importCopyAsVault(f); };
   $("unlockForm").addEventListener("submit", doUnlock);
   $("createForm").addEventListener("submit", doCreate);
-  $("createPw").addEventListener("input", () => { paintMeter("createMeterBar", "createMeterText", $("createPw").value, "Usá una frase larga: 4–6 palabras al azar o 16+ caracteres."); createMatch(); });
+  $("createPw").addEventListener("input", () => { paintMeter("createMeterBar", "createMeterText", $("createPw").value, METER_HINT); createMatch(); });
   $("createPw2").addEventListener("input", createMatch);
   function createMatch() {
     const t = $("createMatch"), a = $("createPw").value, b = $("createPw2").value;
@@ -1466,39 +1569,56 @@
     t.textContent = a === b ? "Coinciden." : "No coinciden."; t.style.color = a === b ? "var(--ok)" : "var(--err)";
   }
 
-  // Barra superior
-  $("lockBtn").onclick = () => lock();
-  $("syncChip").onclick = () => {
-    if (!Drive.configured() || !settings.driveLinked) { showView("settings"); return; }
-    if (!Drive.hasToken()) connectAndSync(); else sync();
+  // Bóveda abierta
+  $("lockBtn").onclick = () => {
+    if (hasUnsyncedChanges() && !confirm("Hay cambios que todavía no se subieron a Drive. Si cerrás la bóveda ahora se pierden. ¿Cerrar igual?")) return;
+    lockVault(null, true); showView("vaults");
   };
-
-  // Bóveda
+  $("syncChip").onclick = () => { if (!Drive.hasToken()) signIn("vaultMsg"); else sync(); };
+  $("tabEntries").onclick = () => vaultTab("entries");
+  $("tabVaultOpts").onclick = () => vaultTab("opts");
   $("search").addEventListener("input", renderEntries);
   $("addEntry").onclick = () => openEntry(null);
   $("entryForm").addEventListener("submit", saveEntry);
+  $("entryDialog").addEventListener("cancel", clearEntryForm);
   $("fDelete").onclick = deleteEntry;
   $("fCopyUser").onclick = () => copyText($("fUser").value, false);
   $("fCopyPass").onclick = () => copyText($("fPass").value, true);
   $("fOpenUrl").onclick = () => {
     const u = $("fUrl").value.trim(); if (!u) return;
-    const url = /^https?:\/\//i.test(u) ? u : "https://" + u;
-    window.open(url, "_blank", "noopener,noreferrer");
+    window.open(/^https?:\/\//i.test(u) ? u : "https://" + u, "_blank", "noopener,noreferrer");
   };
   $("fGen").onclick = () => {
     if ($("fPass").value && !confirm("¿Reemplazar la contraseña actual por una nueva? (Recordá cambiarla también en el sitio.)")) return;
     $("fPass").value = quickGenerate(); setPwVisible("fPass", true); updateEntryStrength();
   };
   $("fPass").addEventListener("input", updateEntryStrength);
+  $("driveSyncNow").onclick = () => sync();
+  $("exportBtn").onclick = exportVault;
+  $("importFileBtn").onclick = () => $("fileImportApp").click();
+  $("fileImportApp").onchange = (ev) => { const f = ev.target.files[0]; ev.target.value = ""; if (f) mergeVaultFile(f); };
+  $("openImportOld").onclick = openImportOld;
+  $("ioDecrypt").onclick = ioDecrypt;
+  $("ioBack").onclick = () => { $("ioStep1").hidden = false; $("ioStep2").hidden = true; $("ioFoot").hidden = true; };
+  $("ioImport").onclick = ioImport;
+  $("renameBtn").onclick = renameVault;
+  $("changePwBtn").onclick = changeMasterPassword;
+  $("deleteVaultBtn").onclick = () => {
+    if (!S) return;
+    const v = (vaultIndex || []).find((x) => x.vaultId === S.vaultId);
+    if (live().length > 0) { showMsg("vaultMsg", "warn", "Para eliminar la bóveda primero tiene que estar vacía: borrá sus " + live().length + " entradas una por una."); return; }
+    if (hasUnsyncedChanges()) { showMsg("vaultMsg", "warn", "Esperá a que se terminen de guardar los cambios en Drive."); return; }
+    if (v) deleteVault(v);
+  };
 
   // Generador
   function loadGenPrefs() {
-    const g = settings.gen;
+    const g = prefs.gen;
     $("genLen").value = g.len; $("genLower").checked = g.lower; $("genUpper").checked = g.upper; $("genDigits").checked = g.digits; $("genSymbols").checked = g.symbols; $("genSymbolSet").value = g.symbolSet;
   }
   function saveGenPrefs() {
-    settings.gen = { len: Number($("genLen").value) || 20, lower: $("genLower").checked, upper: $("genUpper").checked, digits: $("genDigits").checked, symbols: $("genSymbols").checked, symbolSet: $("genSymbolSet").value };
-    saveSettings();
+    prefs.gen = { len: Number($("genLen").value) || 20, lower: $("genLower").checked, upper: $("genUpper").checked, digits: $("genDigits").checked, symbols: $("genSymbols").checked, symbolSet: $("genSymbolSet").value };
+    savePrefs();
   }
   ["genLen", "genLower", "genUpper", "genDigits", "genSymbols", "genSymbolSet"].forEach((i) => $(i).addEventListener("change", saveGenPrefs));
   $("genRun").onclick = async () => {
@@ -1515,8 +1635,8 @@
   $("genToEntry").onclick = () => {
     const v = $("genOut").value;
     if (!v) { showMsg("genMsg", "err", "Primero generá una contraseña."); return; }
-    if (!S) { showMsg("genMsg", "err", "Abrí una bóveda para guardarla."); return; }
-    showView("vault"); openEntry(null, { password: v });
+    if (!S) { showMsg("genMsg", "err", "Abrí una bóveda para guardarla (Bóvedas → elegí una → clave maestra)."); return; }
+    showView("vault"); vaultTab("entries"); openEntry(null, { password: v });
   };
   $("genToText").onclick = () => {
     const v = $("genOut").value;
@@ -1531,7 +1651,7 @@
   $("tabEnc").onclick = () => setMode("enc");
   $("tabDec").onclick = () => setMode("dec");
   $("run").onclick = runText;
-  $("pw").addEventListener("input", () => { paintMeter("meterBar", "meterText", $("pw").value, "Usá una frase larga: 4–6 palabras al azar o 16+ caracteres."); updateMatch(); });
+  $("pw").addEventListener("input", () => { paintMeter("meterBar", "meterText", $("pw").value, METER_HINT); updateMatch(); });
   $("pw2").addEventListener("input", updateMatch);
   ["pw", "pw2"].forEach((i) => $(i).addEventListener("keydown", (e) => { if (e.key === "Enter") runText(); }));
   $("input").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) runText(); });
@@ -1548,32 +1668,19 @@
   };
   $("clear").onclick = () => {
     ["pw", "pw2", "input", "output"].forEach((i) => ($(i).value = ""));
-    setOutputSecret(false); hideMsg("msg"); paintMeter("meterBar", "meterText", "", "Usá una frase larga: 4–6 palabras al azar o 16+ caracteres."); updateMatch();
+    setOutputSecret(false); hideMsg("msg"); paintMeter("meterBar", "meterText", "", METER_HINT); updateMatch();
   };
 
   // Ajustes
-  $("driveConnect").onclick = connectAndSync;
-  $("driveSyncNow").onclick = () => sync();
-  $("driveDisconnect").onclick = () => {
-    if (!confirm("¿Desconectar Google Drive en este dispositivo? Tus bóvedas siguen en Drive y en este dispositivo; solo se deja de sincronizar hasta que vuelvas a conectar.")) return;
-    Drive.revoke(); settings.driveLinked = false; saveSettings(); setSync("off");
-  };
-  $("exportBtn").onclick = exportVault;
-  $("importFileBtn").onclick = () => $("fileImportApp").click();
-  $("fileImportApp").onchange = (ev) => { const f = ev.target.files[0]; ev.target.value = ""; if (f) mergeVaultFile(f); };
-  $("openImportOld").onclick = openImportOld;
-  $("ioDecrypt").onclick = ioDecrypt;
-  $("ioBack").onclick = () => { $("ioStep1").hidden = false; $("ioStep2").hidden = true; $("ioFoot").hidden = true; };
-  $("ioImport").onclick = ioImport;
-  $("renameBtn").onclick = renameVault;
-  $("changePwBtn").onclick = changeMasterPassword;
-  $("forgetVaultBtn").onclick = forgetVault;
-  $("autoLock").value = String(settings.autoLockMin);
-  $("autoLock").onchange = () => { settings.autoLockMin = Number($("autoLock").value) || 5; saveSettings(); };
-  $("rememberLocal").checked = settings.rememberLocal;
-  $("rememberLocal").onchange = () => {
-    settings.rememberLocal = $("rememberLocal").checked; saveSettings(); saveVaults();
-    toast(settings.rememberLocal ? "Las bóvedas se guardan (cifradas) en este dispositivo." : "Las bóvedas ya no se guardan en este dispositivo: al cerrar la app quedan solo en Drive.", 4000);
+  $("autoLock").value = String(prefs.autoLockMin);
+  $("autoLock").onchange = () => { prefs.autoLockMin = Number($("autoLock").value) || 5; savePrefs(); };
+  $("wipeLocal").onclick = async () => {
+    if (!confirm("Se van a borrar de este navegador las preferencias de la app y los archivos de la app guardados para usarla sin internet. Tus bóvedas en Drive no se tocan. ¿Continuar?")) return;
+    Object.keys(localStorage).filter((k) => k.startsWith("cypher.")).forEach((k) => localStorage.removeItem(k));
+    try { if (window.caches) for (const k of await caches.keys()) if (k.startsWith("cypher-")) await caches.delete(k); } catch { /* nada */ }
+    try { if (navigator.serviceWorker) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); } catch { /* nada */ }
+    legacyVaults = []; renderLegacy();
+    showMsg("settingsMsg", "ok", "Listo: no quedó nada de la app en este navegador. Si cerrás la pestaña ahora, no queda rastro.");
   };
   $("selfTestBtn").onclick = (e) => { e.preventDefault(); selfTest(); };
   $("appVersion").textContent = APP_VERSION;
@@ -1585,13 +1692,16 @@
   const standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone;
   if (/iphone|ipad|ipod/i.test(navigator.userAgent) && !standalone) $("iosInstallHint").hidden = false;
 
-  // Service worker (funciona sin internet) y aviso de versión nueva
+  // Service worker: guarda solo los archivos de la app (nunca datos de bóvedas) y avisa si hay versión nueva.
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
     navigator.serviceWorker.register("sw.js").then((reg) => {
       const offer = (w) => {
         if (!w) return;
         $("updateBar").hidden = false;
-        $("updateBtn").onclick = () => w.postMessage("skipWaiting");
+        $("updateBtn").onclick = () => {
+          if (hasUnsyncedChanges() && !confirm("Hay cambios sin subir a Drive que se perderían al actualizar. ¿Actualizar igual?")) return;
+          w.postMessage("skipWaiting");
+        };
       };
       if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
       reg.addEventListener("updatefound", () => {
@@ -1603,23 +1713,21 @@
     let reloaded = false;
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       if (reloaded) return; reloaded = true;
-      if (S) toast("Versión nueva lista: se aplica al bloquear o recargar."); else location.reload();
+      if (!S) location.reload(); else toast("Versión nueva lista: se aplica al recargar la app.");
     });
   }
 
   // Arranque
   loadGenPrefs();
   setMode("enc");
-  paintMeter("meterBar", "meterText", "", "Usá una frase larga: 4–6 palabras al azar o 16+ caracteres.");
-  renderHome();
-  homePanel("list");
+  paintMeter("meterBar", "meterText", "", METER_HINT);
+  renderAccount();
+  showView("vaults");
   if (!window.crypto || !crypto.subtle) {
     showMsg("globalAlert", "err", "Este navegador no ofrece cifrado seguro (Web Crypto). Abrí la app desde https:// en un navegador actualizado.");
   } else {
     selfTestDone = selfTest();
   }
-  // Se precarga el inicio de sesión de Google para que el botón “Conectar” funcione al primer toque.
-  if (Drive.configured()) Drive.load().then(() => { renderHome(); renderDriveSettings(); }).catch(() => {});
-  const rows = allVaultRows();
-  if (rows.length === 1 || (settings.lastVaultId && getEnv(settings.lastVaultId))) selectVault(settings.lastVaultId && getEnv(settings.lastVaultId) ? settings.lastVaultId : rows[0].id);
+  // Se precarga el inicio de sesión de Google para que el botón funcione al primer toque.
+  if (Drive.configured() && navigator.onLine) Drive.load().catch(() => {});
 })();

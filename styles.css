@@ -163,3 +163,41 @@ dialog.sheet > form, dialog.sheet > div { display: flex; flex-direction: column;
 .dot.ok { background: var(--ok); }
 .dot.err { background: var(--err); }
 .st-legend { margin-top: 8px; font-size: 12px; color: var(--muted); }
+
+/* ---------- v1.1: cuenta, menú en secciones, vistas ---------- */
+.account { position: relative; display: flex; align-items: center; }
+.acct-btn { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px 3px 3px; cursor: pointer; max-width: 46vw; }
+.acct-btn img { width: 30px; height: 30px; border-radius: 50%; background: var(--line); object-fit: cover; flex: 0 0 30px; }
+.acct-text { display: none; flex-direction: column; line-height: 1.15; text-align: left; min-width: 0; }
+.acct-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#acctName { font-size: 13px; font-weight: 600; }
+#acctEmail { font-size: 11px; color: var(--muted); }
+.caret { color: var(--muted); font-size: 11px; }
+@media (min-width: 700px) { .acct-text { display: flex; } }
+.acct-menu { position: absolute; right: 0; top: calc(100% + 6px); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; min-width: 230px; box-shadow: 0 10px 30px rgba(0,0,0,.35); z-index: 40; overflow: hidden; }
+.acct-menu-head { padding: 12px 14px; display: flex; flex-direction: column; border-bottom: 1px solid var(--line); word-break: break-all; }
+.menu-item { display: block; width: 100%; text-align: left; padding: 11px 14px; background: none; border: 0; cursor: pointer; }
+.menu-item:hover { background: var(--panel2); }
+.nav-label, .nav-vaults { display: none; }
+.nav-section { display: contents; }
+.center-card { text-align: center; max-width: 520px; margin: 30px auto; padding: 28px 20px; }
+.center-card .btn { margin-top: 8px; }
+.big-ico { font-size: 40px; }
+.narrow { max-width: 480px; margin: 10px auto; }
+.vault-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.vault-head h2 { flex: 1; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subtabs { margin-bottom: 10px; }
+.vault-list .v-row { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); }
+.vault-list .v-row .grow { cursor: pointer; }
+.vault-list .v-row.current { border-color: var(--accent); }
+@media (min-width: 900px) {
+  .nav { overflow-y: auto; }
+  .nav-section { display: flex; flex-direction: column; gap: 2px; margin-bottom: 14px; }
+  .nav-bottom { margin-top: auto; margin-bottom: 0; }
+  .nav-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 6px 12px 4px; }
+  .nav-vaults { display: flex; flex-direction: column; gap: 2px; }
+  .nv-sub { display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 34px; border-radius: 10px; background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 13px; text-align: left; }
+  .nv-sub span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nv-sub:hover { color: var(--text); }
+  .nv-sub[aria-current=page] { background: var(--panel); color: var(--accent); font-weight: 600; }
+}

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<!-- Solo se permite hablar con Google (inicio de sesión y Drive). Nada más puede cargarse ni enviarse. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; connect-src 'self' https://www.googleapis.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<!-- Solo se permite hablar con Google (inicio de sesión, Drive y tu foto de perfil). Nada más puede cargarse ni enviarse. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; connect-src 'self' https://www.googleapis.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; img-src 'self' data: https://*.googleusercontent.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#0f1216">
 <meta name="description" content="Bóvedas de contraseñas cifradas con clave maestra. Todo se cifra en tu dispositivo.">
@@ -22,82 +22,162 @@
 <div class="msg global" id="globalAlert" role="alert"></div>
 <div class="update-bar" id="updateBar" hidden>Hay una versión nueva de la app. <button type="button" class="btn small primary" id="updateBtn">Actualizar</button></div>
 
-<!-- ================= PANTALLA DE INICIO: LISTA DE BÓVEDAS ================= -->
-<div id="home" class="home">
-  <div class="home-card">
-    <div class="brand"><img src="icons/icon.svg" alt="" width="44" height="44"><div><h1>Cypher</h1><p class="sub">Tus bóvedas de contraseñas, cifradas en tu dispositivo.</p></div></div>
-
-    <div id="homeList">
-      <div class="section-head"><h2>Bóvedas</h2><span class="small" id="homeDriveState"></span></div>
-      <ul class="vault-list" id="vaultList"></ul>
-      <p class="empty small" id="vaultListEmpty">Todavía no hay bóvedas en este dispositivo. Creá una nueva o buscá las que tengas en tu Google Drive.</p>
-      <div class="home-actions">
-        <button type="button" class="btn primary" id="homeCreate">+ Nueva bóveda</button>
-        <button type="button" class="btn" id="homeDrive">Buscar en Google Drive</button>
-        <button type="button" class="btn" id="homeImport">Importar archivo .cypher</button>
-        <button type="button" class="btn ghost" id="homeTools">Herramientas sin abrir bóveda</button>
-      </div>
-      <div class="msg" id="homeMsg" role="status"></div>
-    </div>
-
-    <form id="unlockForm" class="stack" hidden autocomplete="off">
-      <button type="button" class="link back" data-home-back>← Bóvedas</button>
-      <h2 id="unlockTitle">Abrir bóveda</h2>
-      <p class="small" id="unlockWhere"></p>
-      <label for="unlockPw">Clave maestra</label>
-      <div class="pw"><input type="password" id="unlockPw" autocomplete="current-password" spellcheck="false"><button type="button" data-toggle="unlockPw">Mostrar</button></div>
-      <button type="submit" class="btn primary block" id="unlockBtn">Abrir</button>
-      <div class="msg" id="unlockMsg" role="status"></div>
-    </form>
-
-    <form id="createForm" class="stack" hidden autocomplete="off">
-      <button type="button" class="link back" data-home-back>← Bóvedas</button>
-      <h2>Nueva bóveda</h2>
-      <label for="createName">Nombre (se ve sin la clave: no pongas datos sensibles)</label>
-      <input type="text" id="createName" maxlength="60" placeholder="Ej: Personal, Trabajo, Familia" spellcheck="false">
-      <label for="createPw">Clave maestra</label>
-      <div class="pw"><input type="password" id="createPw" autocomplete="new-password" spellcheck="false"><button type="button" data-toggle="createPw">Mostrar</button></div>
-      <div class="meter"><i id="createMeterBar"></i></div>
-      <div class="hint" id="createMeterText"></div>
-      <label for="createPw2">Repetir clave maestra</label>
-      <div class="pw"><input type="password" id="createPw2" autocomplete="new-password" spellcheck="false"><button type="button" data-toggle="createPw2">Mostrar</button></div>
-      <div class="hint" id="createMatch"></div>
-      <p class="small warnline">Si olvidás la clave maestra no hay forma de recuperar la bóveda. Nadie puede resetearla, ni siquiera Google.</p>
-      <button type="submit" class="btn primary block" id="createBtn">Crear bóveda</button>
-      <div class="msg" id="createMsg" role="status"></div>
-    </form>
-  </div>
-  <input type="file" id="fileImportHome" accept=".cypher,application/json,application/octet-stream" hidden>
-</div>
-
-<!-- ================= APP ================= -->
-<div id="app" class="app" hidden>
+<div id="app" class="app">
   <header class="topbar">
-    <div class="tb-title"><img src="icons/icon.svg" alt="" width="26" height="26"><span id="tbVault">Cypher</span></div>
-    <button type="button" class="chip" id="syncChip" title="Estado de guardado">…</button>
-    <button type="button" class="btn small" id="lockBtn" title="Cerrar la bóveda">🔒 <span class="hide-sm">Bloquear</span></button>
+    <div class="tb-title"><img src="icons/icon.svg" alt="" width="26" height="26"><span id="tbTitle">Cypher</span></div>
+    <button type="button" class="chip" id="syncChip" title="Estado de guardado" hidden>…</button>
+    <div class="account" id="accountBox">
+      <button type="button" class="btn small primary" id="signInTop">Iniciar sesión con Google</button>
+      <button type="button" class="acct-btn" id="acctBtn" hidden aria-haspopup="menu" aria-expanded="false">
+        <img id="acctPhoto" alt="" referrerpolicy="no-referrer" width="30" height="30"><span class="acct-text"><span id="acctName"></span><span id="acctEmail"></span></span><span class="caret">▾</span>
+      </button>
+      <div class="acct-menu" id="acctMenu" role="menu" hidden>
+        <div class="acct-menu-head"><b id="acctMenuName"></b><span class="small" id="acctMenuEmail"></span></div>
+        <button type="button" class="menu-item" id="signOutBtn" role="menuitem">Cerrar sesión</button>
+      </div>
+    </div>
   </header>
 
   <nav class="nav" id="nav">
-    <button type="button" data-view="vault" class="nv"><span class="ico">🗝️</span><span>Bóveda</span></button>
-    <button type="button" data-view="gen" class="nv"><span class="ico">🎲</span><span>Generar</span></button>
-    <button type="button" data-view="text" class="nv"><span class="ico">🔐</span><span>Cifrar texto</span></button>
-    <button type="button" data-view="settings" class="nv"><span class="ico">⚙️</span><span>Ajustes</span></button>
+    <div class="nav-section">
+      <div class="nav-label">Con tu cuenta de Google</div>
+      <button type="button" data-view="vaults" class="nv"><span class="ico">🗄️</span><span>Bóvedas</span></button>
+      <div class="nav-vaults" id="navVaults"></div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Sin cuenta</div>
+      <button type="button" data-view="gen" class="nv"><span class="ico">🎲</span><span>Generar</span></button>
+      <button type="button" data-view="text" class="nv"><span class="ico">🔐</span><span>Cifrar texto</span></button>
+    </div>
+    <div class="nav-section nav-bottom">
+      <button type="button" data-view="settings" class="nv"><span class="ico">⚙️</span><span>Ajustes</span></button>
+    </div>
   </nav>
 
   <main class="content">
-    <!-- ---------- BÓVEDA ---------- -->
-    <section id="view-vault" class="view">
-      <div class="msg warn" id="backupBanner" role="status"></div>
-      <div class="searchbar">
-        <input type="search" id="search" placeholder="Buscar sitio, usuario, nota…" autocomplete="off" spellcheck="false">
+    <!-- ---------- BÓVEDAS ---------- -->
+    <section id="view-vaults" class="view">
+      <div id="vaultsOffline" class="panel center-card" hidden>
+        <div class="big-ico">📡</div>
+        <h2>Sin conexión a internet</h2>
+        <p class="small">Tus bóvedas viven solo en tu Google Drive y nunca se guardan en este dispositivo, así que sin internet no se pueden abrir. El generador y el cifrado de texto siguen funcionando.</p>
       </div>
-      <ul class="entries" id="entryList"></ul>
-      <div class="empty" id="entryEmpty">
-        <p>Esta bóveda está vacía.</p>
-        <p class="small">Tocá <b>+</b> para agregar tu primera contraseña, o importá tus notas cifradas viejas desde <b>Ajustes</b>.</p>
+      <div id="vaultsLogin" class="panel center-card" hidden>
+        <div class="big-ico">🔑</div>
+        <h2>Iniciá sesión para ver tus bóvedas</h2>
+        <p class="small">Las bóvedas se guardan cifradas en tu Google Drive. Iniciá sesión con tu cuenta de Google para verlas, crear nuevas o abrirlas con su clave maestra.</p>
+        <button type="button" class="btn primary" id="signInMain">Iniciar sesión con Google</button>
+        <div class="msg" id="loginMsg" role="status"></div>
       </div>
-      <button type="button" class="fab" id="addEntry" title="Nueva entrada" aria-label="Nueva entrada">+</button>
+      <div id="vaultsList" hidden>
+        <div class="msg warn" id="legacyBanner" role="status"></div>
+        <div class="section-head"><h2>Tus bóvedas</h2><span class="small" id="vaultsCount"></span></div>
+        <ul class="vault-list" id="vaultList"></ul>
+        <p class="empty small" id="vaultListEmpty">Todavía no tenés bóvedas. Creá la primera.</p>
+        <div class="actions">
+          <button type="button" class="btn primary" id="createOpen">+ Nueva bóveda</button>
+          <button type="button" class="btn" id="importCopyBtn">Subir una copia (.cypher)</button>
+          <button type="button" class="btn ghost" id="refreshVaults">↻ Actualizar</button>
+        </div>
+        <input type="file" id="fileImportCopy" accept=".cypher,application/json,application/octet-stream" hidden>
+        <div class="msg" id="vaultsMsg" role="status"></div>
+        <div id="trashBox" hidden>
+          <div class="section-head"><h2>En la papelera de Drive</h2></div>
+          <p class="small">Estas bóvedas se eliminaron (por la app o desde Drive). Google las guarda 30 días en la papelera; podés restaurarlas.</p>
+          <ul class="vault-list" id="trashList"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- ABRIR BÓVEDA ---------- -->
+    <section id="view-unlock" class="view" hidden>
+      <form id="unlockForm" class="panel narrow stack" autocomplete="off">
+        <button type="button" class="link back" data-go="vaults">← Bóvedas</button>
+        <h2 id="unlockTitle">Abrir bóveda</h2>
+        <label for="unlockPw">Clave maestra</label>
+        <div class="pw"><input type="password" id="unlockPw" autocomplete="off" spellcheck="false"><button type="button" data-toggle="unlockPw">Mostrar</button></div>
+        <button type="submit" class="btn primary block" id="unlockBtn">Abrir</button>
+        <div class="msg" id="unlockMsg" role="status"></div>
+      </form>
+    </section>
+
+    <!-- ---------- NUEVA BÓVEDA ---------- -->
+    <section id="view-create" class="view" hidden>
+      <form id="createForm" class="panel narrow stack" autocomplete="off">
+        <button type="button" class="link back" data-go="vaults">← Bóvedas</button>
+        <h2>Nueva bóveda</h2>
+        <label for="createName">Nombre (se ve sin la clave: no pongas datos sensibles)</label>
+        <input type="text" id="createName" maxlength="60" placeholder="Ej: Personal, Trabajo, Familia" spellcheck="false" autocomplete="off">
+        <label for="createPw">Clave maestra</label>
+        <div class="pw"><input type="password" id="createPw" autocomplete="off" spellcheck="false"><button type="button" data-toggle="createPw">Mostrar</button></div>
+        <div class="meter"><i id="createMeterBar"></i></div>
+        <div class="hint" id="createMeterText"></div>
+        <label for="createPw2">Repetir clave maestra</label>
+        <div class="pw"><input type="password" id="createPw2" autocomplete="off" spellcheck="false"><button type="button" data-toggle="createPw2">Mostrar</button></div>
+        <div class="hint" id="createMatch"></div>
+        <p class="small warnline">Si olvidás la clave maestra no hay forma de recuperar la bóveda. Nadie puede resetearla, ni siquiera Google.</p>
+        <button type="submit" class="btn primary block" id="createBtn">Crear bóveda</button>
+        <div class="msg" id="createMsg" role="status"></div>
+      </form>
+    </section>
+
+    <!-- ---------- BÓVEDA ABIERTA ---------- -->
+    <section id="view-vault" class="view" hidden>
+      <div class="vault-head">
+        <button type="button" class="link" data-go="vaults">← Bóvedas</button>
+        <h2 id="vaultTitle"></h2>
+        <button type="button" class="btn small" id="lockBtn">🔒 Cerrar bóveda</button>
+      </div>
+      <div class="msg warn" id="vaultBanner" role="status"></div>
+      <div class="tabs subtabs" role="tablist">
+        <button type="button" id="tabEntries" role="tab" aria-selected="true">Entradas</button>
+        <button type="button" id="tabVaultOpts" role="tab" aria-selected="false">Opciones de la bóveda</button>
+      </div>
+      <div id="paneEntries">
+        <div class="searchbar"><input type="search" id="search" placeholder="Buscar sitio, usuario, nota…" autocomplete="off" spellcheck="false"></div>
+        <ul class="entries" id="entryList"></ul>
+        <div class="empty" id="entryEmpty">
+          <p>Esta bóveda está vacía.</p>
+          <p class="small">Tocá <b>+</b> para agregar tu primera contraseña, o importá tus notas cifradas viejas desde <b>Opciones de la bóveda</b>.</p>
+        </div>
+        <button type="button" class="fab" id="addEntry" title="Nueva entrada" aria-label="Nueva entrada">+</button>
+      </div>
+      <div id="paneVaultOpts" hidden>
+        <div class="panel">
+          <h2>Guardado</h2>
+          <p class="small" id="driveInfo"></p>
+          <button type="button" class="btn" id="driveSyncNow">Sincronizar ahora</button>
+        </div>
+        <div class="panel">
+          <h2>Copias de respaldo</h2>
+          <p class="small">Descargá una copia cifrada y guardala fuera de Google (un pendrive, otra nube). Se abre con la misma clave maestra. Es lo único que la app deja en tu equipo, y solo si vos lo pedís.</p>
+          <div class="actions">
+            <button type="button" class="btn primary" id="exportBtn">Descargar copia cifrada</button>
+            <button type="button" class="btn" id="importFileBtn">Combinar con una copia (.cypher)</button>
+          </div>
+          <input type="file" id="fileImportApp" accept=".cypher,application/json,application/octet-stream" hidden>
+          <div class="msg" id="backupMsg" role="status"></div>
+        </div>
+        <div class="panel">
+          <h2>Importar notas cifradas viejas</h2>
+          <p class="small">Pegá los textos que cifraste con el cifrador anterior (por ejemplo, desde Google Keep). Se descifran acá, revisás lo que se detectó y elegís qué guardar en esta bóveda.</p>
+          <button type="button" class="btn" id="openImportOld">Importar notas viejas</button>
+        </div>
+        <div class="panel">
+          <h2>Esta bóveda</h2>
+          <label for="renameInput">Nombre</label>
+          <div class="inline">
+            <input type="text" id="renameInput" maxlength="60" spellcheck="false" autocomplete="off">
+            <button type="button" class="btn" id="renameBtn">Renombrar</button>
+          </div>
+          <div class="actions">
+            <button type="button" class="btn" id="changePwBtn">Cambiar clave maestra</button>
+            <button type="button" class="btn danger" id="deleteVaultBtn">Eliminar bóveda</button>
+          </div>
+          <p class="small">Solo se puede eliminar si está vacía. Va a la papelera de Google Drive, donde queda 30 días.</p>
+          <div class="msg" id="vaultMsg" role="status"></div>
+        </div>
+      </div>
     </section>
 
     <!-- ---------- GENERAR ---------- -->
@@ -198,51 +278,9 @@
 
     <!-- ---------- AJUSTES ---------- -->
     <section id="view-settings" class="view" hidden>
-      <div class="panel" data-needs-vault>
-        <h2>Google Drive</h2>
-        <p class="small" id="driveInfo"></p>
-        <div class="actions">
-          <button type="button" class="btn primary" id="driveConnect">Conectar Google Drive</button>
-          <button type="button" class="btn" id="driveSyncNow">Sincronizar ahora</button>
-          <button type="button" class="btn" id="driveDisconnect">Desconectar</button>
-        </div>
-        <div class="msg" id="driveMsg" role="status"></div>
-      </div>
-
-      <div class="panel" data-needs-vault>
-        <h2>Copias de respaldo</h2>
-        <p class="small">Descargá una copia cifrada de esta bóveda y guardala fuera de Google (un pendrive, otra nube). Se abre con la misma clave maestra. <span id="lastExport"></span></p>
-        <div class="actions">
-          <button type="button" class="btn primary" id="exportBtn">Descargar copia cifrada</button>
-          <button type="button" class="btn" id="importFileBtn">Combinar con una copia (.cypher)</button>
-        </div>
-        <input type="file" id="fileImportApp" accept=".cypher,application/json,application/octet-stream" hidden>
-        <div class="msg" id="backupMsg" role="status"></div>
-      </div>
-
-      <div class="panel" data-needs-vault>
-        <h2>Importar notas cifradas viejas</h2>
-        <p class="small">Pegá los textos que cifraste con el cifrador anterior (por ejemplo, desde Google Keep). Se descifran acá, revisás lo que se detectó y elegís qué guardar en esta bóveda.</p>
-        <button type="button" class="btn" id="openImportOld">Importar notas viejas</button>
-      </div>
-
-      <div class="panel" data-needs-vault>
-        <h2>Esta bóveda</h2>
-        <label for="renameInput">Nombre</label>
-        <div class="inline">
-          <input type="text" id="renameInput" maxlength="60" spellcheck="false">
-          <button type="button" class="btn" id="renameBtn">Renombrar</button>
-        </div>
-        <div class="actions">
-          <button type="button" class="btn" id="changePwBtn">Cambiar clave maestra</button>
-          <button type="button" class="btn danger" id="forgetVaultBtn">Quitar de este dispositivo</button>
-        </div>
-        <div class="msg" id="vaultMsg" role="status"></div>
-      </div>
-
       <div class="panel">
-        <h2>Este dispositivo</h2>
-        <label for="autoLock">Bloquear automáticamente después de</label>
+        <h2>Seguridad en este dispositivo</h2>
+        <label for="autoLock">Cerrar la bóveda abierta después de</label>
         <select id="autoLock">
           <option value="1">1 minuto sin uso</option>
           <option value="2">2 minutos sin uso</option>
@@ -251,12 +289,15 @@
           <option value="15">15 minutos sin uso</option>
           <option value="30">30 minutos sin uso</option>
         </select>
-        <label class="check"><input type="checkbox" id="rememberLocal" checked> Guardar las bóvedas (cifradas) en este dispositivo para usarlas sin internet</label>
-        <p class="small">Desactivalo en una computadora ajena: las bóvedas quedan solo en memoria y en tu Drive. En dispositivos ajenos usá siempre una ventana de incógnito.</p>
+        <p class="small">Las bóvedas (cifradas o no) nunca se guardan en este dispositivo: viven solo en memoria mientras la app está abierta y se borran al cerrarla, al bloquear o al cerrar sesión. Lo único que se guarda acá son estas preferencias y los archivos de la app (para que el generador y el cifrado de texto anden sin internet). En dispositivos ajenos usá una ventana de incógnito.</p>
+        <div class="actions">
+          <button type="button" class="btn" id="wipeLocal">Borrar todo rastro de la app en este navegador</button>
+        </div>
         <div class="actions" id="installBox" hidden>
           <button type="button" class="btn primary" id="installBtn">Instalar la app</button>
         </div>
         <p class="small" id="iosInstallHint" hidden>Para instalarla en iPhone/iPad: botón Compartir → “Agregar a pantalla de inicio”.</p>
+        <div class="msg" id="settingsMsg" role="status"></div>
       </div>
 
       <div class="panel">
@@ -270,10 +311,11 @@
 
       <div class="panel">
         <details>
-          <summary>Cómo funciona</summary>
-          <p class="small">Cada bóveda es un único archivo cifrado con AES-256-GCM. La clave se deriva de tu clave maestra con PBKDF2-SHA256 (600.000 iteraciones) y una sal aleatoria propia de cada bóveda. Todo se cifra y descifra en tu dispositivo: a Google Drive solo llega el archivo cifrado, y la app solo puede ver los archivos que ella misma creó en tu Drive (permiso <code>drive.file</code>). Drive guarda versiones anteriores del archivo.</p>
+          <summary>Cómo funciona y dónde se guarda</summary>
+          <p class="small">Cada bóveda es un único archivo cifrado con AES-256-GCM. La clave se deriva de tu clave maestra con PBKDF2-SHA256 (600.000 iteraciones) y una sal aleatoria propia de cada bóveda. Todo se cifra y descifra en tu dispositivo: a Google Drive solo llega el archivo cifrado.</p>
+          <p class="small">Las bóvedas nuevas se guardan en la carpeta <b>Cypher</b> de tu Drive (“Mi unidad”), con nombre “Cypher - Nombre.cypher”. Podés moverlas a otra carpeta: la app las encuentra igual. Si las borrás desde Drive van a la papelera y la app te ofrece restaurarlas durante 30 días. Drive guarda además versiones anteriores de cada archivo. La app solo puede ver los archivos que ella misma creó (permiso <code>drive.file</code>), no el resto de tu Drive.</p>
           <p class="small">El nombre de la bóveda se guarda sin cifrar para poder listarla. La clave maestra nunca se guarda ni se envía a ningún lado.</p>
-          <p class="small">El cifrador anterior (una sola página, sin conexión a internet) sigue disponible en <a href="cifrador.html" target="_blank" rel="noopener">cifrador.html</a>. Guardá una copia de ese archivo: abierto desde tu PC funciona igual.</p>
+          <p class="small">El cifrador anterior (una sola página, sin conexión a internet) sigue disponible en <a href="cifrador.html" target="_blank" rel="noopener">cifrador.html</a>.</p>
           <p class="small">Versión <span id="appVersion"></span>.</p>
         </details>
       </div>
@@ -281,7 +323,6 @@
   </main>
 </div>
 
-<!-- ================= DIÁLOGOS ================= -->
 <dialog id="entryDialog" class="sheet">
   <form method="dialog" id="entryForm" autocomplete="off">
     <header class="sheet-head"><h2 id="entryDialogTitle">Entrada</h2><button type="button" class="icon-btn" data-close aria-label="Cerrar">✕</button></header>
