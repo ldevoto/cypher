@@ -243,3 +243,6 @@ dialog.sheet > form, dialog.sheet > div { display: flex; flex-direction: column;
 .brand-link:hover { background: var(--panel); }
 .brand-link img { border-radius: 8px; }
 .legal { margin-top: 18px; } .legal a, .small a { color: var(--accent); }
+/* Campos de clave: texto enmascarado (el navegador no ofrece guardarlos como contraseña) */
+input.masked { -webkit-text-security: disc; text-security: disc; }
+#fPassStrength { min-height: 18px; }

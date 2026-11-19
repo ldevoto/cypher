@@ -99,7 +99,7 @@
         <button type="button" class="link back" data-go="vaults">← Bóvedas</button>
         <h2 id="unlockTitle">Abrir bóveda</h2>
         <label for="unlockPw">Clave maestra</label>
-        <div class="pw"><input type="password" id="unlockPw" autocomplete="off" spellcheck="false"><button type="button" data-toggle="unlockPw">Mostrar</button></div>
+        <div class="pw"><input autocomplete="off" autocorrect="off" autocapitalize="off" data-lpignore="true" data-1p-ignore data-bwignore class="masked" type="text" id="unlockPw" spellcheck="false"><button type="button" data-toggle="unlockPw">Mostrar</button></div>
         <button type="submit" class="btn primary block" id="unlockBtn">Abrir</button>
         <div class="msg" id="unlockMsg" role="status"></div>
       </form>
@@ -113,11 +113,11 @@
         <label for="createName">Nombre (se ve sin la clave: no pongas datos sensibles)</label>
         <input type="text" id="createName" maxlength="60" placeholder="Ej: Personal, Trabajo, Familia" spellcheck="false" autocomplete="off">
         <label for="createPw">Clave maestra</label>
-        <div class="pw"><input type="password" id="createPw" autocomplete="off" spellcheck="false"><button type="button" data-toggle="createPw">Mostrar</button></div>
+        <div class="pw"><input autocomplete="off" autocorrect="off" autocapitalize="off" data-lpignore="true" data-1p-ignore data-bwignore class="masked" type="text" id="createPw" spellcheck="false"><button type="button" data-toggle="createPw">Mostrar</button></div>
         <div class="meter"><i id="createMeterBar"></i></div>
         <div class="hint" id="createMeterText"></div>
         <label for="createPw2">Repetir clave maestra</label>
-        <div class="pw"><input type="password" id="createPw2" autocomplete="off" spellcheck="false"><button type="button" data-toggle="createPw2">Mostrar</button></div>
+        <div class="pw"><input autocomplete="off" autocorrect="off" autocapitalize="off" data-lpignore="true" data-1p-ignore data-bwignore class="masked" type="text" id="createPw2" spellcheck="false"><button type="button" data-toggle="createPw2">Mostrar</button></div>
         <div class="hint" id="createMatch"></div>
         <p class="small warnline">Si olvidás la clave maestra no hay forma de recuperar la bóveda. Nadie puede resetearla, ni siquiera Google.</p>
         <button type="submit" class="btn primary block" id="createBtn">Crear bóveda</button>
@@ -207,7 +207,7 @@
         <input type="text" id="genSymbolSet" spellcheck="false" autocomplete="off" value="!@#$%^&amp;*()-_=+[]{};:,.?/~">
         <label for="genOut">Contraseña generada</label>
         <div class="pw">
-          <input type="password" id="genOut" readonly spellcheck="false" autocomplete="off" placeholder="Tocá Generar" class="mono">
+          <input autocomplete="off" autocorrect="off" autocapitalize="off" data-lpignore="true" data-1p-ignore data-bwignore type="text" id="genOut" readonly spellcheck="false" placeholder="Tocá Generar" class="mono masked">
           <button type="button" data-toggle="genOut">Mostrar</button>
         </div>
         <div class="hint" id="genInfo">Cada vez que generás sale una contraseña nueva e irrepetible: guardala antes de generar otra.</div>
@@ -231,13 +231,13 @@
         <div class="row">
           <div>
             <label for="pw">Clave</label>
-            <div class="pw"><input type="password" id="pw" autocomplete="off" spellcheck="false"><button type="button" data-toggle="pw">Mostrar</button></div>
+            <div class="pw"><input autocomplete="off" autocorrect="off" autocapitalize="off" data-lpignore="true" data-1p-ignore data-bwignore class="masked" type="text" id="pw" spellcheck="false"><button type="button" data-toggle="pw">Mostrar</button></div>
             <div class="meter"><i id="meterBar"></i></div>
             <div class="hint" id="meterText"></div>
           </div>
           <div id="confirmBox">
             <label for="pw2">Repetir clave</label>
-            <div class="pw"><input type="password" id="pw2" autocomplete="off" spellcheck="false"><button type="button" data-toggle="pw2">Mostrar</button></div>
+            <div class="pw"><input autocomplete="off" autocorrect="off" autocapitalize="off" data-lpignore="true" data-1p-ignore data-bwignore class="masked" type="text" id="pw2" spellcheck="false"><button type="button" data-toggle="pw2">Mostrar</button></div>
             <div class="hint" id="matchText"></div>
           </div>
         </div>
@@ -341,10 +341,11 @@
       <div class="inline"><input type="text" id="fUser" spellcheck="false" autocapitalize="off"><button type="button" class="btn" id="fCopyUser">Copiar</button></div>
       <label for="fPass">Contraseña</label>
       <div class="inline">
-        <div class="pw grow"><input type="password" id="fPass" spellcheck="false" autocomplete="off" class="mono"><button type="button" data-toggle="fPass">Mostrar</button></div>
+        <div class="pw grow"><input autocomplete="off" autocorrect="off" autocapitalize="off" data-lpignore="true" data-1p-ignore data-bwignore type="text" id="fPass" spellcheck="false" class="mono masked"><button type="button" data-toggle="fPass">Mostrar</button></div>
         <button type="button" class="btn" id="fCopyPass">Copiar</button>
       </div>
-      <div class="hint"><span id="fPassStrength"></span></div>
+      <div class="meter"><i id="fPassMeterBar"></i></div>
+      <div class="hint" id="fPassStrength"></div>
       <div class="gen-box">
         <div class="gen-row">
           <button type="button" class="btn small" id="fGen">🎲 Generar</button>
@@ -389,7 +390,7 @@
         <label for="ioText">Textos cifrados (uno por línea o separados por espacios)</label>
         <textarea id="ioText" spellcheck="false" rows="5" placeholder="Pegá acá tus notas cifradas…"></textarea>
         <label for="ioPw">Clave con la que las cifraste</label>
-        <div class="pw"><input type="password" id="ioPw" autocomplete="off" spellcheck="false"><button type="button" data-toggle="ioPw">Mostrar</button></div>
+        <div class="pw"><input autocomplete="off" autocorrect="off" autocapitalize="off" data-lpignore="true" data-1p-ignore data-bwignore class="masked" type="text" id="ioPw" spellcheck="false"><button type="button" data-toggle="ioPw">Mostrar</button></div>
         <details class="adv">
           <summary>Opciones avanzadas</summary>
           <p class="small">Se prueban automáticamente los 3 algoritmos y las 2 derivaciones. Solo cambiá las iteraciones si no usaste 400.000.</p>

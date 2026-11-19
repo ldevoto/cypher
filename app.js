@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  const APP_VERSION = "1.2.2";
+  const APP_VERSION = "1.2.3";
   const CFG = window.CYPHER_CONFIG || {};
   const $ = (id) => document.getElementById(id);
   const te = new TextEncoder();
@@ -1053,10 +1053,7 @@
     $("entryDialog").showModal();
     if (!e) setTimeout(() => $("fTitle").focus(), 30);
   }
-  function updateEntryStrength() {
-    const p = $("fPass").value;
-    $("fPassStrength").textContent = p ? "Seguridad: " + strength(p).label : "";
-  }
+  function updateEntryStrength() { paintMeter("fPassMeterBar", "fPassStrength", $("fPass").value, ""); }
   function clearEntryForm() { ["fTitle", "fUser", "fPass", "fNotes"].forEach((i) => ($(i).value = "")); }
   async function saveEntry(ev) {
     ev.preventDefault();
@@ -1094,8 +1091,10 @@
       $("promptTitle").textContent = title; $("promptText").textContent = text || "";
       const f = $("promptFields"); f.textContent = "";
       const mk = (id, label) => {
-        f.append(el("label", { for: id, text: label }), el("div", { class: "pw" }, el("input", { type: "password", id, autocomplete: "off", spellcheck: "false" }),
-          el("button", { type: "button", text: "Mostrar", onclick: (ev) => { const i = $(id); i.type = i.type === "password" ? "text" : "password"; ev.target.textContent = i.type === "password" ? "Mostrar" : "Ocultar"; } })));
+        const inp = el("input", { type: "text", class: "masked", id, autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: "false", "data-lpignore": "true", "data-1p-ignore": "", "data-bwignore": "" });
+        if (!CSS_MASK) inp.type = "password";
+        f.append(el("label", { for: id, text: label }), el("div", { class: "pw" }, inp,
+          el("button", { type: "button", text: "Mostrar", onclick: (ev) => { const show = isMasked(inp); maskInput(inp, !show); ev.target.textContent = show ? "Ocultar" : "Mostrar"; } })));
       };
       mk("promptPw", confirmField ? "Clave maestra actual" : "Clave maestra");
       if (confirmField) { mk("promptNew", "Nueva clave maestra"); mk("promptNew2", "Repetir nueva clave maestra"); }
@@ -1529,13 +1528,21 @@
   // =====================================================================
   // Eventos
   // =====================================================================
+  // Los campos de clave son type="text" enmascarados por CSS: así el navegador no los trata como
+  // contraseñas y nunca ofrece guardarlas. Si el navegador no soporta el enmascarado, se usa type="password".
+  const CSS_MASK = typeof CSS !== "undefined" && CSS.supports && CSS.supports("-webkit-text-security", "disc");
+  function maskInput(i, hidden) {
+    if (CSS_MASK) { i.type = "text"; i.classList.toggle("masked", hidden); }
+    else i.type = hidden ? "password" : "text";
+  }
+  const isMasked = (i) => (CSS_MASK ? i.classList.contains("masked") : i.type === "password");
   function setPwVisible(id, show) {
-    const i = $(id); i.type = show ? "text" : "password";
+    const i = $(id); maskInput(i, !show);
     const b = document.querySelector('[data-toggle="' + id + '"]');
     if (b) b.textContent = show ? "Ocultar" : "Mostrar";
   }
   const METER_HINT = "Usá una frase larga: 4–6 palabras al azar o 16+ caracteres.";
-  document.querySelectorAll("[data-toggle]").forEach((b) => b.addEventListener("click", () => setPwVisible(b.dataset.toggle, $(b.dataset.toggle).type === "password")));
+  document.querySelectorAll("[data-toggle]").forEach((b) => b.addEventListener("click", () => setPwVisible(b.dataset.toggle, isMasked($(b.dataset.toggle)))));
   document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => showView(b.dataset.go)));
   document.querySelectorAll("dialog [data-close]").forEach((b) => b.addEventListener("click", () => { b.closest("dialog").close(); if (b.closest("#entryDialog")) clearEntryForm(); }));
   document.querySelectorAll(".nv").forEach((b) => b.addEventListener("click", () => {
@@ -1588,6 +1595,11 @@
   $("addEntryEmpty").onclick = () => openEntry(null);
   $("importOldEmpty").onclick = openImportOld;
   $("entryForm").addEventListener("submit", saveEntry);
+  $("entryForm").addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" || ev.isComposing || ev.target.tagName !== "INPUT") return;
+    ev.preventDefault();
+    if (ev.target.type !== "checkbox") ev.target.dispatchEvent(new Event("change", { bubbles: true }));
+  });
   $("entryDialog").addEventListener("cancel", clearEntryForm);
   $("fDelete").onclick = deleteEntry;
   $("fCopyUser").onclick = () => copyText($("fUser").value, false);
@@ -1745,6 +1757,7 @@
   }
 
   // Arranque
+  if (!CSS_MASK) document.querySelectorAll("input.masked").forEach((i) => (i.type = "password"));
   loadGenPrefs();
   setMode("enc");
   paintMeter("meterBar", "meterText", "", METER_HINT);
