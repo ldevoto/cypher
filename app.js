@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  const APP_VERSION = "1.2.4";
+  const APP_VERSION = "1.2.5";
   const CFG = window.CYPHER_CONFIG || {};
   const $ = (id) => document.getElementById(id);
   const te = new TextEncoder();
@@ -336,14 +336,12 @@
   // =====================================================================
   const LS_PREFS = "cypher.prefs.v2";
   const LEGACY_SETTINGS = "cypher.settings.v1", LEGACY_VAULTS = "cypher.vaults.v1";
-  const prefs = Object.assign({
-    autoLockMin: 5,
-    gen: { len: 20, lower: true, upper: true, digits: true, symbols: true, symbolSet: DEFAULT_SYMBOLS },
-  }, loadJSON(LS_PREFS, {}));
+  const prefs = Object.assign({ autoLockMin: 5 }, loadJSON(LS_PREFS, {}));
+  if ("gen" in prefs) { delete prefs.gen; saveJSON(LS_PREFS, prefs); } // las opciones del generador ya no se recuerdan
   (() => { // migra preferencias de la versión anterior y borra lo demás
     const old = loadJSON(LEGACY_SETTINGS, null);
     if (old) {
-      if (!localStorage.getItem(LS_PREFS)) { if (old.autoLockMin) prefs.autoLockMin = old.autoLockMin; if (old.gen) prefs.gen = old.gen; saveJSON(LS_PREFS, prefs); }
+      if (!localStorage.getItem(LS_PREFS)) { if (old.autoLockMin) prefs.autoLockMin = old.autoLockMin; saveJSON(LS_PREFS, prefs); }
       localStorage.removeItem(LEGACY_SETTINGS);
     }
   })();
@@ -1654,23 +1652,22 @@
   };
 
   // Generador
-  // El generador de la herramienta y el de la entrada comparten las mismas opciones guardadas.
+  // Las opciones del generador no se guardan: cada vez arrancan con los valores por defecto
+  // (la herramienta Generar al abrir la app; el generador de la entrada cada vez que se abre una entrada).
+  const GEN_DEFAULTS = { len: 20, lower: true, upper: true, digits: true, symbols: true, symbolSet: DEFAULT_SYMBOLS };
   function loadGenPrefs(px = "gen") {
-    const g = prefs.gen;
+    const g = GEN_DEFAULTS;
     $(px + "Len").value = g.len; $(px + "Lower").checked = g.lower; $(px + "Upper").checked = g.upper; $(px + "Digits").checked = g.digits; $(px + "Symbols").checked = g.symbols; $(px + "SymbolSet").value = g.symbolSet;
-    if (px === "fg") { $("fgLenRange").value = Math.min(64, Number(g.len) || 20); $("fgSymbolSet").disabled = !g.symbols; }
+    if (px === "fg") { $("fgLenRange").value = g.len; $("fgSymbolSet").disabled = !g.symbols; }
   }
   function saveGenPrefs(px = "gen") {
-    prefs.gen = { len: Number($(px + "Len").value) || 20, lower: $(px + "Lower").checked, upper: $(px + "Upper").checked, digits: $(px + "Digits").checked, symbols: $(px + "Symbols").checked, symbolSet: $(px + "SymbolSet").value };
-    savePrefs();
-    loadGenPrefs(px === "gen" ? "fg" : "gen");
-    if (px === "fg") { $("fgLenRange").value = Math.min(64, Number($("fgLen").value) || 20); $("fgSymbolSet").disabled = !$("fgSymbols").checked; }
+    if (px !== "fg") return;
+    $("fgLenRange").value = Math.min(64, Number($("fgLen").value) || 20); $("fgSymbolSet").disabled = !$("fgSymbols").checked;
     genSummary();
   }
   function genSummary() {
-    const g = prefs.gen;
-    const kinds = [g.lower && "minúsculas", g.upper && "mayúsculas", g.digits && "números", g.symbols && "símbolos"].filter(Boolean);
-    $("fGenSummary").textContent = g.len + " caracteres" + (kinds.length ? ": " + kinds.join(", ") : "");
+    const kinds = [["fgLower", "minúsculas"], ["fgUpper", "mayúsculas"], ["fgDigits", "números"], ["fgSymbols", "símbolos"]].filter(([id]) => $(id).checked).map(([, t]) => t);
+    $("fGenSummary").textContent = (Number($("fgLen").value) || 0) + " caracteres" + (kinds.length ? ": " + kinds.join(", ") : "");
   }
   function loadEntryGen() {
     loadGenPrefs("fg"); genSummary();

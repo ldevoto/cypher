@@ -1,6 +1,6 @@
 // Service worker: guarda la app para que funcione sin internet.
 // Cambiá VERSION en cada publicación para que los dispositivos bajen la versión nueva.
-const VERSION = "cypher-v1.2.4";
+const VERSION = "cypher-v1.2.5";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "config.js", "manifest.webmanifest",
   "cifrador.html", "privacy.html", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon.png"];
 
