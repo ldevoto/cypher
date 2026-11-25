@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  const APP_VERSION = "1.2.3";
+  const APP_VERSION = "1.2.4";
   const CFG = window.CYPHER_CONFIG || {};
   const $ = (id) => document.getElementById(id);
   const te = new TextEncoder();
@@ -1601,6 +1601,23 @@
     if (ev.target.type !== "checkbox") ev.target.dispatchEvent(new Event("change", { bubbles: true }));
   });
   $("entryDialog").addEventListener("cancel", clearEntryForm);
+  // Tocar fuera de un diálogo (en el fondo oscuro) lo cierra, igual que Escape.
+  // Solo si el toque empezó y terminó afuera: arrastrar una selección desde adentro no lo cierra.
+  document.querySelectorAll("dialog").forEach((d) => {
+    const outside = (ev) => {
+      if (ev.target !== d) return false;
+      const r = d.getBoundingClientRect();
+      return ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom;
+    };
+    let downOutside = false;
+    d.addEventListener("pointerdown", (ev) => { downOutside = outside(ev); });
+    d.addEventListener("click", (ev) => {
+      if (!downOutside || !outside(ev)) return;
+      downOutside = false;
+      const c = new Event("cancel", { cancelable: true });
+      if (d.dispatchEvent(c) && d.open) d.close();
+    });
+  });
   $("fDelete").onclick = deleteEntry;
   $("fCopyUser").onclick = () => copyText($("fUser").value, false);
   $("fCopyPass").onclick = () => copyText($("fPass").value, true);
